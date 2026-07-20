@@ -21,11 +21,32 @@ You send a screenshot ──▶ Telegram bot (webhook)
 ## What you get
 - **Automatic logging** — no forms. A screenshot or a one-line text is enough
   ("XAUUSD buy, +$120, 2R").
-- **A live website** at your Render URL: KPI tiles (net P&L, win rate, profit
-  factor, avg R), an equity curve, and a full trades table. Auto-refreshes.
+- **A TradeZella-style dashboard** at your Render URL: KPI cards with win-rate
+  and profit-factor gauges, trade expectancy, avg win/loss, a **monthly P&L
+  calendar** (green/red day cells + weekly totals), an equity curve, and a
+  trades table. Auto-refreshes every 30s.
+- **Multiple traders** — share the bot with someone else and each person's
+  trades are tagged with their Telegram username. The dashboard has
+  **per-trader tabs** (All / you / them) that recompute every stat, and
+  `/stats` breaks results down by trader.
+- **Click any trade** → a popup shows the **original screenshot** plus a
+  Claude-written explanation of the trade.
 - **Your data in a Google Sheet** you fully own and can edit by hand.
 - **Bot commands:** `/stats` for a quick summary, `/undo` to remove the last
   entry, `/help`.
+
+### How multi-trader works
+Every message carries the sender's Telegram identity. The bot saves that as a
+`trader` column in the sheet and tags the trade with it — no configuration
+needed. Add a second person by simply sharing your bot's @username with them;
+their first logged trade creates their tab automatically. (Tip: if you set
+`ALLOWED_TELEGRAM_USER_IDS`, add both people's IDs, comma-separated.)
+
+### How screenshots are stored
+Telegram permanently retains every photo sent to a bot. Rather than use paid
+persistent disk on Render (its free disk is wiped on each restart), the bot
+stores Telegram's `file_id` in the sheet and the dashboard streams the image
+back through `/api/image/<file_id>` on demand — free, and it survives restarts.
 
 ## Tech
 - **FastAPI** web service (one process) running the Telegram **webhook** and
@@ -59,14 +80,15 @@ and `app/config.py` for how they're read. Required: `TELEGRAM_BOT_TOKEN`,
 ## Project layout
 ```
 app/
-  main.py       FastAPI app: webhook + dashboard + /api/trades
-  bot.py        Telegram update handling (commands, photos, text)
-  analyzer.py   Claude vision → structured trade
-  storage.py    Google Sheets read/write
-  stats.py      Performance metrics + equity curve
+  main.py       FastAPI app: webhook + dashboard + /api/trades + /api/image
+  bot.py        Telegram update handling (commands, photos, text, trader id)
+  analyzer.py   Claude vision → structured trade + written analysis
+  storage.py    Google Sheets read/write (incl. trader, file_id, analysis)
+  stats.py      Performance metrics, per-trader filtering, calendar buckets
   telegram.py   Telegram Bot API client (webhook mode)
   config.py     Env-var configuration
-  templates/dashboard.html   The live website
+  static/chart.umd.min.js    Bundled Chart.js (no external CDN needed)
+  templates/dashboard.html   The TradeZella-style dashboard
 docs/SETUP.md   Step-by-step setup for a non-developer
 render.yaml     One-click Render deploy
 ```

@@ -34,6 +34,11 @@ HEADERS = [
     "notes",
     "source",
     "confidence",
+    # Appended after v1 so existing sheets migrate cleanly (old rows just have
+    # blank values in these columns).
+    "trader",
+    "telegram_file_id",
+    "analysis",
 ]
 
 _worksheet: gspread.Worksheet | None = None
@@ -67,7 +72,7 @@ def _get_worksheet() -> gspread.Worksheet:
         return ws
 
 
-def _append_sync(trade: dict[str, Any], source: str) -> None:
+def _append_sync(trade: dict[str, Any], source: str, trader: str, file_id: str) -> None:
     ws = _get_worksheet()
     row = [
         datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -87,6 +92,9 @@ def _append_sync(trade: dict[str, Any], source: str) -> None:
         trade.get("notes") or "",
         source,
         trade.get("confidence") if trade.get("confidence") is not None else "",
+        trader,
+        file_id,
+        trade.get("analysis") or "",
     ]
     ws.append_row(row, value_input_option="USER_ENTERED")
 
@@ -105,8 +113,8 @@ def _delete_last_sync() -> bool:
     return True
 
 
-async def append_trade(trade: dict[str, Any], source: str) -> None:
-    await asyncio.to_thread(_append_sync, trade, source)
+async def append_trade(trade: dict[str, Any], source: str, trader: str = "", file_id: str = "") -> None:
+    await asyncio.to_thread(_append_sync, trade, source, trader, file_id)
 
 
 async def read_trades() -> list[dict[str, Any]]:

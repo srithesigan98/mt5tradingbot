@@ -30,13 +30,25 @@ def _fmt_num(value: Any) -> str:
         return str(value)
 
 
-def _confirmation(trade: dict[str, Any]) -> str:
+def _trader_name(message: dict[str, Any]) -> str:
+    """A human-readable identity for whoever sent the message."""
+    sender = message.get("from") or {}
+    username = (sender.get("username") or "").strip()
+    if username:
+        return username
+    first = (sender.get("first_name") or "").strip()
+    last = (sender.get("last_name") or "").strip()
+    return (f"{first} {last}".strip()) or f"user-{sender.get('id', 'unknown')}"
+
+
+def _confirmation(trade: dict[str, Any], trader: str) -> str:
     outcome = (trade.get("outcome") or "unknown").lower()
     emoji = {"profit": "✅", "loss": "🔻", "breakeven": "⚖️"}.get(outcome, "📝")
     instrument = trade.get("instrument") or "trade"
     direction = (trade.get("direction") or "").upper()
 
     lines = [f"{emoji} <b>Logged {instrument} {direction}</b>".rstrip()]
+    lines.append(f"Trader: {trader}")
     lines.append(f"Result: <b>{outcome.capitalize()}</b>")
 
     pnl = trade.get("pnl_amount")
@@ -97,7 +109,14 @@ def _largest_photo(message: dict[str, Any]) -> dict[str, Any] | None:
     return max(photos, key=lambda p: p.get("file_size", 0))
 
 
-async def _analyze_and_log(chat_id: int, caption: str, image_bytes: bytes | None, source: str) -> None:
+async def _analyze_and_log(
+    chat_id: int,
+    caption: str,
+    image_bytes: bytes | None,
+    source: str,
+    trader: str,
+    file_id: str = "",
+) -> None:
     await telegram.send_chat_action(chat_id)
     trade = await analyzer.analyze(caption, image_bytes, "image/jpeg")
 
@@ -109,8 +128,8 @@ async def _analyze_and_log(chat_id: int, caption: str, image_bytes: bytes | None
         )
         return
 
-    await storage.append_trade(trade, source)
-    await telegram.send_message(chat_id, _confirmation(trade))
+    await storage.append_trade(trade, source, trader=trader, file_id=file_id)
+    await telegram.send_message(chat_id, _confirmation(trade, trader))
 
 
 async def handle_update(update: dict[str, Any]) -> None:
@@ -135,13 +154,17 @@ async def handle_update(update: dict[str, Any]) -> None:
             return
 
     photo = _largest_photo(message)
+    trader = _trader_name(message)
 
     try:
         if photo:
             image_bytes = await telegram.get_file_bytes(photo["file_id"])
-            await _analyze_and_log(chat_id, caption, image_bytes, source="photo")
+            await _analyze_and_log(
+                chat_id, caption, image_bytes, source="photo",
+                trader=trader, file_id=photo["file_id"],
+            )
         elif text.strip():
-            await _analyze_and_log(chat_id, text, None, source="text")
+            await _analyze_and_log(chat_id, text, None, source="text", trader=trader)
         else:
             await telegram.send_message(
                 chat_id,

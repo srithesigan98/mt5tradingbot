@@ -6,12 +6,13 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import bot, config, storage
-from .stats import compute
+from .stats import compute, filter_by_trader, trader_names
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Trading Journal", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 
 
 @app.get("/health")
@@ -67,13 +69,50 @@ async def telegram_webhook(
 
 
 @app.get("/api/trades")
-async def api_trades() -> JSONResponse:
+async def api_trades(trader: str = Query(default="")) -> JSONResponse:
     try:
         rows = await storage.read_trades()
     except Exception:  # noqa: BLE001
         log.exception("Failed to read trades")
         raise HTTPException(status_code=500, detail="could not read journal")
-    return JSONResponse(compute(rows))
+
+    traders = trader_names(rows)
+    selected = trader.strip()
+    if selected:
+        rows = filter_by_trader(rows, selected)
+
+    payload = compute(rows)
+    payload["traders"] = traders
+    payload["selected_trader"] = selected
+    return JSONResponse(payload)
+
+
+# Small in-memory cache so repeat views don't re-download from Telegram.
+_image_cache: dict[str, bytes] = {}
+_IMAGE_CACHE_MAX = 60
+
+
+@app.get("/api/image/{file_id}")
+async def api_image(file_id: str) -> Response:
+    """Serve a trade screenshot by proxying it from Telegram's file storage."""
+    if file_id in _image_cache:
+        return Response(content=_image_cache[file_id], media_type="image/jpeg")
+    try:
+        from . import telegram
+
+        data = await telegram.get_file_bytes(file_id)
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to fetch image %s", file_id)
+        raise HTTPException(status_code=404, detail="image not available")
+
+    if len(_image_cache) >= _IMAGE_CACHE_MAX:
+        _image_cache.pop(next(iter(_image_cache)))
+    _image_cache[file_id] = data
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

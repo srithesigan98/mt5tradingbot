@@ -79,6 +79,14 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
                 "type": ["string", "null"],
                 "description": "Any extra context, strategy, or the user's own words.",
             },
+            "analysis": {
+                "type": "string",
+                "description": (
+                    "A 2-4 sentence explanation of this trade for the journal: what "
+                    "was traded, what happened, and one constructive observation "
+                    "(e.g. about risk management or execution). Plain language."
+                ),
+            },
             "confidence": {
                 "type": "number",
                 "description": "Your confidence 0-1 that the extracted numbers are correct.",
@@ -100,6 +108,7 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
             "take_profit",
             "trade_date",
             "notes",
+            "analysis",
             "confidence",
         ],
     },

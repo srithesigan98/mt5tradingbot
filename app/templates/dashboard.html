@@ -4,26 +4,27 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Trading Journal</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <script src="/static/chart.umd.min.js"></script>
   <style>
     :root {
-      --bg: #0f1115;
-      --surface: #171a21;
-      --surface-2: #1f232c;
-      --border: #2a2f3a;
-      --ink: #e8eaed;
-      --ink-2: #a2a9b4;
-      --muted: #6b7280;
-      --accent: #3b82f6;
-      --good: #22c55e;
+      --bg: #f6f4fd;
+      --surface: #ffffff;
+      --surface-2: #f3f0fb;
+      --border: #e7e2f6;
+      --ink: #201c3a;
+      --ink-2: #5b5680;
+      --muted: #928db3;
+      --purple: #6c4cf1;
+      --purple-dark: #2b2467;
+      --purple-soft: #ece7fd;
+      --good: #10b981;
+      --good-bg: #e5f7ef;
+      --good-ink: #0a7c5c;
       --bad: #ef4444;
+      --bad-bg: #fdeaec;
+      --bad-ink: #c0392b;
       --be: #eab308;
-    }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e2e5ea;
-        --ink: #14171c; --ink-2: #4b5563; --muted: #8a92a0;
-      }
+      --be-bg: #fdf6df;
     }
     * { box-sizing: border-box; }
     body {
@@ -31,57 +32,184 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
-    header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
-    h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
-    .sub { color: var(--muted); font-size: 13px; }
-    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
-    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-    .kpi .label { color: var(--ink-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
-    .kpi .value { font-size: 24px; font-weight: 650; margin-top: 6px; letter-spacing: -0.02em; }
-    .pos { color: var(--good); } .neg { color: var(--bad); } .neu { color: var(--ink); }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
-    .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--ink-2); font-weight: 600; }
-    .chart-box { position: relative; height: 300px; }
-    .table-scroll { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
-    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-    td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-    .pill.profit { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
-    .pill.loss { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
-    .pill.breakeven { background: color-mix(in srgb, var(--be) 20%, transparent); color: var(--be); }
-    .pill.unknown { background: var(--surface-2); color: var(--ink-2); }
-    .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 72px; }
+
+    /* Top bar */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-wrap: wrap; margin-bottom: 18px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand .logo {
+      width: 38px; height: 38px; border-radius: 11px; background: var(--purple-dark);
+      display: grid; place-items: center; font-size: 19px; color: #fff;
+    }
+    .brand h1 { font-size: 19px; margin: 0; letter-spacing: -0.01em; }
+    .brand .sub { color: var(--muted); font-size: 12px; }
     .refresh { color: var(--muted); font-size: 12px; }
-    a { color: var(--accent); }
+
+    /* Trader tabs */
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+    .tab {
+      border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+      padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .tab:hover { border-color: var(--purple); color: var(--purple); }
+    .tab.active { background: var(--purple); border-color: var(--purple); color: #fff; }
+
+    /* Cards & KPIs */
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 16px 18px; box-shadow: 0 1px 3px rgba(60, 40, 140, 0.05);
+    }
+    .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--ink-2); font-weight: 600; }
+    .kpis {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px; margin-bottom: 18px;
+    }
+    .kpi .label { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .kpi .value { font-size: 26px; font-weight: 700; margin-top: 6px; letter-spacing: -0.02em; }
+    .kpi .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .kpi.gauge { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .kpi.gauge .donut { width: 74px; height: 74px; flex: none; position: relative; }
+    .kpi.gauge .donut .center {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      font-size: 13px; font-weight: 700;
+    }
+    .pos { color: var(--good-ink); } .neg { color: var(--bad-ink); } .neu { color: var(--ink); }
+
+    .grid-2 { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 14px; margin-bottom: 18px; }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* Calendar */
+    .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .cal-title { font-weight: 700; font-size: 15px; }
+    .cal-nav { display: flex; gap: 6px; }
+    .cal-nav button {
+      border: 1px solid var(--border); background: var(--surface); border-radius: 8px;
+      width: 30px; height: 30px; cursor: pointer; color: var(--ink-2); font-size: 14px;
+    }
+    .cal-nav button:hover { border-color: var(--purple); color: var(--purple); }
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr) 1.15fr; gap: 6px; }
+    .cal-dow { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; text-align: center; padding: 4px 0; }
+    .cal-cell {
+      min-height: 64px; border-radius: 10px; background: var(--surface-2);
+      padding: 6px 7px; font-size: 11px; position: relative;
+    }
+    .cal-cell .d { color: var(--muted); font-weight: 600; }
+    .cal-cell.off { background: transparent; }
+    .cal-cell.win { background: var(--good-bg); }
+    .cal-cell.win .p { color: var(--good-ink); }
+    .cal-cell.lose { background: var(--bad-bg); }
+    .cal-cell.lose .p { color: var(--bad-ink); }
+    .cal-cell.flat { background: var(--be-bg); }
+    .cal-cell .p { font-weight: 700; font-size: 12px; margin-top: 3px; }
+    .cal-cell .c { color: var(--ink-2); margin-top: 1px; }
+    .cal-week {
+      min-height: 64px; border-radius: 10px; background: var(--purple-soft);
+      padding: 6px 9px; font-size: 11px;
+    }
+    .cal-week .t { color: var(--purple); font-weight: 700; }
+    .cal-week .p { font-weight: 700; font-size: 13px; margin-top: 3px; }
+    .cal-week .c { color: var(--ink-2); margin-top: 1px; }
+
+    /* Chart */
+    .chart-box { position: relative; height: 280px; }
+
+    /* Table */
+    .table-card { margin-top: 18px; }
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 700px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr { cursor: pointer; transition: background .1s; }
+    tbody tr:hover { background: var(--surface-2); }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .pill.profit { background: var(--good-bg); color: var(--good-ink); }
+    .pill.loss { background: var(--bad-bg); color: var(--bad-ink); }
+    .pill.breakeven { background: var(--be-bg); color: #9a7b06; }
+    .pill.unknown { background: var(--surface-2); color: var(--ink-2); }
+    .trader-chip {
+      display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px;
+      font-weight: 600; background: var(--purple-soft); color: var(--purple);
+    }
+    .cam { color: var(--muted); }
+    .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+
+    /* Modal */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(24, 18, 60, 0.55);
+      display: none; align-items: flex-start; justify-content: center;
+      padding: 4vh 16px; z-index: 50; overflow-y: auto;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border-radius: 18px; max-width: 640px; width: 100%;
+      padding: 20px; position: relative; box-shadow: 0 20px 60px rgba(24, 18, 60, 0.3);
+    }
+    .modal .close {
+      position: absolute; top: 12px; right: 12px; border: none; background: var(--surface-2);
+      width: 32px; height: 32px; border-radius: 999px; cursor: pointer; font-size: 15px; color: var(--ink-2);
+    }
+    .modal h3 { margin: 0 32px 4px 0; font-size: 17px; }
+    .modal .meta { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+    .modal img { width: 100%; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 14px; }
+    .detail-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px; margin-bottom: 14px;
+    }
+    .detail-grid .item { background: var(--surface-2); border-radius: 10px; padding: 8px 10px; }
+    .detail-grid .k { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .detail-grid .v { font-size: 14px; font-weight: 700; margin-top: 3px; }
+    .analysis {
+      background: var(--purple-soft); border-radius: 12px; padding: 12px 14px;
+      font-size: 13px; line-height: 1.55; color: var(--purple-dark);
+    }
+    .analysis .k { font-weight: 700; color: var(--purple); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 5px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <div>
-        <h1>📈 Trading Journal</h1>
-        <div class="sub">Auto-updated from your Telegram bot</div>
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo">📈</div>
+        <div>
+          <h1>Trading Journal</h1>
+          <div class="sub">Auto-updated from Telegram</div>
+        </div>
       </div>
       <div class="refresh" id="updated"></div>
-    </header>
+    </div>
+
+    <div class="tabs" id="tabs"></div>
 
     <div class="kpis" id="kpis"></div>
 
-    <div class="card">
-      <h2>Equity curve (cumulative P&amp;L)</h2>
-      <div class="chart-box"><canvas id="equity"></canvas></div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="cal-head">
+          <div class="cal-title" id="calTitle"></div>
+          <div class="cal-nav">
+            <button id="calPrev" aria-label="Previous month">‹</button>
+            <button id="calNext" aria-label="Next month">›</button>
+          </div>
+        </div>
+        <div class="calendar" id="calendar"></div>
+      </div>
+      <div class="card">
+        <h2>Equity curve (cumulative P&amp;L)</h2>
+        <div class="chart-box"><canvas id="equity"></canvas></div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>Trades</h2>
+    <div class="card table-card">
+      <h2>Trades — click a row for the screenshot &amp; analysis</h2>
       <div class="table-scroll"><table id="table">
         <thead><tr>
-          <th>#</th><th>Logged</th><th>Instrument</th><th>Dir</th><th>Result</th>
-          <th class="num">P&amp;L</th><th class="num">Pips</th><th class="num">R</th>
-          <th class="num">Cumulative</th><th>Notes</th>
+          <th>#</th><th>Date</th><th>Trader</th><th>Instrument</th><th>Dir</th><th>Result</th>
+          <th class="num">P&amp;L</th><th class="num">R</th><th class="num">Cumulative</th><th></th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table></div>
@@ -91,96 +219,297 @@
     </div>
   </div>
 
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <button class="close" id="modalClose">✕</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
   <script>
     const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const fmt = (n) => (n === null || n === undefined || n === "") ? "—"
-      : (typeof n === "number" ? (Number.isInteger(n) ? n : n.toFixed(2)) : n);
+      : (typeof n === "number" ? (Number.isInteger(n) ? String(n) : n.toFixed(2)) : String(n));
+    const money = (n) => (n === null || n === undefined) ? "—"
+      : (n < 0 ? "-$" + Math.abs(n).toFixed(2).replace(/\.00$/, "") : "$" + n.toFixed(2).replace(/\.00$/, ""));
     const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neu");
 
-    let chart;
+    let state = {
+      trader: "",                 // "" = all traders
+      month: null,                // Date anchored to 1st of shown month
+      data: null,
+      charts: {},
+    };
 
-    function renderKpis(s) {
-      const cur = "";
-      const pf = s.profit_factor === null ? "—" : s.profit_factor;
-      const avgR = s.avg_r === null ? "—" : s.avg_r;
-      const kpis = [
-        { label: "Net P&L", value: fmt(s.net_pnl), cls: signClass(s.net_pnl) },
-        { label: "Win rate", value: s.win_rate + "%", cls: "neu" },
-        { label: "Trades", value: `${s.total_trades}`, cls: "neu",
-          sub: `${s.wins}W / ${s.losses}L / ${s.breakeven}BE` },
-        { label: "Profit factor", value: pf, cls: "neu" },
-        { label: "Avg R", value: avgR, cls: "neu" },
-        { label: "Best / Worst", value: `${fmt(s.best_trade)} / ${fmt(s.worst_trade)}`, cls: "neu" },
-      ];
-      document.getElementById("kpis").innerHTML = kpis.map(k => `
-        <div class="kpi">
-          <div class="label">${k.label}</div>
-          <div class="value ${k.cls}">${k.value}</div>
-          ${k.sub ? `<div class="sub">${k.sub}</div>` : ""}
-        </div>`).join("");
+    /* ---------- Trader tabs ---------- */
+    function renderTabs(traders) {
+      const el = document.getElementById("tabs");
+      const mk = (name, label) => `<button class="tab ${state.trader === name ? "active" : ""}"
+        data-trader="${esc(name)}">${esc(label)}</button>`;
+      el.innerHTML = mk("", "All traders") + traders.map(t => mk(t, t)).join("");
+      el.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+        state.trader = b.dataset.trader;
+        load();
+      });
     }
 
+    /* ---------- KPI cards ---------- */
+    function donut(id, segments, colors, centerText) {
+      const el = document.getElementById(id);
+      if (state.charts[id]) state.charts[id].destroy();
+      state.charts[id] = new Chart(el, {
+        type: "doughnut",
+        data: { datasets: [{ data: segments, backgroundColor: colors, borderWidth: 0 }] },
+        options: {
+          cutout: "74%", responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        },
+      });
+      el.parentElement.querySelector(".center").textContent = centerText;
+    }
+
+    function renderKpis(s) {
+      const pf = s.profit_factor;
+      const kpiHtml = `
+        <div class="card kpi">
+          <div class="label">Net P&amp;L</div>
+          <div class="value ${signClass(s.net_pnl)}">${money(s.net_pnl)}</div>
+          <div class="hint">${s.total_trades} trades</div>
+        </div>
+        <div class="card kpi gauge">
+          <div>
+            <div class="label">Trade win %</div>
+            <div class="value neu">${s.win_rate}%</div>
+            <div class="hint">${s.wins}W · ${s.losses}L · ${s.breakeven}BE</div>
+          </div>
+          <div class="donut"><canvas id="winDonut"></canvas><div class="center"></div></div>
+        </div>
+        <div class="card kpi gauge">
+          <div>
+            <div class="label">Profit factor</div>
+            <div class="value neu">${pf === null ? "—" : pf}</div>
+            <div class="hint">${money(s.gross_profit)} / ${money(s.gross_loss)}</div>
+          </div>
+          <div class="donut"><canvas id="pfDonut"></canvas><div class="center"></div></div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Trade expectancy</div>
+          <div class="value ${signClass(s.expectancy || 0)}">${s.expectancy === null ? "—" : money(s.expectancy)}</div>
+          <div class="hint">avg P&amp;L per trade</div>
+        </div>
+        <div class="card kpi">
+          <div class="label">Avg win / loss</div>
+          <div class="value neu">${s.avg_win === null ? "—" : money(s.avg_win)} <span class="cam">/</span> ${s.avg_loss === null ? "—" : money(s.avg_loss)}</div>
+          <div class="hint">Avg R: ${s.avg_r === null ? "—" : s.avg_r}</div>
+        </div>`;
+      document.getElementById("kpis").innerHTML = kpiHtml;
+
+      donut("winDonut",
+        [s.wins || 0, s.losses || 0, s.breakeven || 0].some(v => v > 0)
+          ? [s.wins, s.losses, s.breakeven] : [1],
+        [css("--good"), css("--bad"), css("--be")], `${s.win_rate}%`);
+      donut("pfDonut",
+        (s.gross_profit || s.gross_loss) ? [s.gross_profit, s.gross_loss] : [1],
+        [css("--good"), css("--bad")], pf === null ? "—" : String(pf));
+    }
+
+    /* ---------- Calendar ---------- */
+    function renderCalendar(trades) {
+      const anchor = state.month;
+      const y = anchor.getFullYear(), m = anchor.getMonth();
+      document.getElementById("calTitle").textContent =
+        anchor.toLocaleString("en", { month: "long", year: "numeric" });
+
+      // Aggregate per day: pnl, count, wins/decisive
+      const daily = {};
+      for (const t of trades) {
+        if (!t.date) continue;
+        const [ty, tm] = [Number(t.date.slice(0, 4)), Number(t.date.slice(5, 7)) - 1];
+        if (ty !== y || tm !== m) continue;
+        const d = Number(t.date.slice(8, 10));
+        daily[d] ??= { pnl: 0, n: 0, w: 0, dec: 0 };
+        daily[d].n++;
+        if (t.pnl_amount !== null) daily[d].pnl += t.pnl_amount;
+        if (t.outcome === "profit") { daily[d].w++; daily[d].dec++; }
+        else if (t.outcome === "loss") daily[d].dec++;
+      }
+
+      const dows = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+      let html = dows.map(d => `<div class="cal-dow">${d}</div>`).join("")
+        + `<div class="cal-dow">Week</div>`;
+
+      const first = new Date(y, m, 1);
+      const start = new Date(y, m, 1 - first.getDay()); // Sunday on/before the 1st
+      let week = 1;
+      for (let cur = new Date(start); cur <= new Date(y, m + 1, 0) || cur.getDay() !== 0; cur.setDate(cur.getDate() + 1)) {
+        const inMonth = cur.getMonth() === m;
+        const d = cur.getDate();
+        const agg = inMonth ? daily[d] : undefined;
+        if (!inMonth) {
+          html += `<div class="cal-cell off"></div>`;
+        } else if (!agg) {
+          html += `<div class="cal-cell"><span class="d">${d}</span></div>`;
+        } else {
+          const cls = agg.pnl > 0 ? "win" : agg.pnl < 0 ? "lose" : "flat";
+          const winPct = agg.dec ? Math.round(100 * agg.w / agg.dec) : null;
+          html += `<div class="cal-cell ${cls}">
+            <span class="d">${d}</span>
+            <div class="p">${money(Math.round(agg.pnl * 100) / 100)}</div>
+            <div class="c">${agg.n} trade${agg.n > 1 ? "s" : ""}${winPct === null ? "" : " · " + winPct + "%"}</div>
+          </div>`;
+        }
+        // End of a Sat column -> weekly summary cell
+        if (cur.getDay() === 6) {
+          let wp = 0, wn = 0;
+          const wkStart = new Date(cur); wkStart.setDate(cur.getDate() - 6);
+          for (let dd = new Date(wkStart); dd <= cur; dd.setDate(dd.getDate() + 1)) {
+            if (dd.getMonth() !== m) continue;
+            const a = daily[dd.getDate()];
+            if (a) { wp += a.pnl; wn += a.n; }
+          }
+          html += `<div class="cal-week">
+            <div class="t">Week ${week}</div>
+            <div class="p ${signClass(wp)}">${money(Math.round(wp * 100) / 100)}</div>
+            <div class="c">${wn} trade${wn === 1 ? "" : "s"}</div>
+          </div>`;
+          week++;
+          if (cur >= new Date(y, m + 1, 0)) break; // finished the last week of the month
+        }
+      }
+      document.getElementById("calendar").innerHTML = html;
+    }
+
+    /* ---------- Equity chart ---------- */
     function renderChart(trades) {
       const labels = trades.map(t => "#" + t.index);
       const data = trades.map(t => t.cumulative_pnl);
       const ctx = document.getElementById("equity");
-      const accent = css("--accent");
+      const purple = css("--purple");
       const grid = css("--border");
-      const ink2 = css("--ink-2");
+      const ink2 = css("--muted");
 
-      const gradient = ctx.getContext("2d").createLinearGradient(0, 0, 0, 300);
-      gradient.addColorStop(0, accent + "44");
-      gradient.addColorStop(1, accent + "00");
+      const gradient = ctx.getContext("2d").createLinearGradient(0, 0, 0, 280);
+      gradient.addColorStop(0, purple + "3d");
+      gradient.addColorStop(1, purple + "00");
 
-      if (chart) chart.destroy();
-      chart = new Chart(ctx, {
+      if (state.charts.equity) state.charts.equity.destroy();
+      state.charts.equity = new Chart(ctx, {
         type: "line",
         data: { labels, datasets: [{
-          data, borderColor: accent, backgroundColor: gradient,
-          borderWidth: 2, fill: true, tension: 0.25,
-          pointRadius: trades.length > 40 ? 0 : 3, pointBackgroundColor: accent,
+          data, borderColor: purple, backgroundColor: gradient,
+          borderWidth: 2.5, fill: true, tension: 0.3,
+          pointRadius: trades.length > 40 ? 0 : 3, pointBackgroundColor: purple,
         }]},
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
-            tooltip: { callbacks: { label: (c) => "Cumulative: " + fmt(c.parsed.y) } } },
+            tooltip: { callbacks: { label: (c) => "Cumulative: " + money(c.parsed.y) } } },
           scales: {
-            x: { grid: { color: grid }, ticks: { color: ink2, maxTicksLimit: 10 } },
-            y: { grid: { color: grid }, ticks: { color: ink2 } },
+            x: { grid: { color: grid }, ticks: { color: ink2, maxTicksLimit: 8 } },
+            y: { grid: { color: grid }, ticks: { color: ink2, callback: v => money(v) } },
           },
         },
       });
     }
 
+    /* ---------- Trades table + modal ---------- */
     function renderTable(trades) {
       const tbody = document.getElementById("tbody");
       const empty = document.getElementById("empty");
-      if (!trades.length) { empty.style.display = "block"; document.getElementById("table").style.display = "none"; return; }
-      const rows = trades.slice().reverse().map(t => {
-        const when = (t.logged_at || "").replace("T", " ").slice(0, 16);
-        const outcome = (t.outcome || "unknown");
-        return `<tr>
+      const table = document.getElementById("table");
+      if (!trades.length) { empty.style.display = "block"; table.style.display = "none"; return; }
+      empty.style.display = "none"; table.style.display = "";
+
+      tbody.innerHTML = trades.slice().reverse().map(t => {
+        const outcome = t.outcome || "unknown";
+        return `<tr data-index="${t.index}">
           <td>${t.index}</td>
-          <td>${when}</td>
-          <td>${t.instrument || "—"}</td>
-          <td>${(t.direction || "").toUpperCase()}</td>
+          <td>${esc(t.date || (t.logged_at || "").slice(0, 10))}</td>
+          <td>${t.trader ? `<span class="trader-chip">${esc(t.trader)}</span>` : "—"}</td>
+          <td><b>${esc(t.instrument || "—")}</b></td>
+          <td>${esc((t.direction || "").toUpperCase())}</td>
           <td><span class="pill ${outcome}">${outcome}</span></td>
-          <td class="num ${signClass(t.pnl_amount || 0)}">${fmt(t.pnl_amount)}</td>
-          <td class="num">${fmt(t.pips)}</td>
+          <td class="num ${signClass(t.pnl_amount || 0)}">${money(t.pnl_amount)}</td>
           <td class="num">${fmt(t.r_multiple)}</td>
-          <td class="num ${signClass(t.cumulative_pnl)}">${fmt(t.cumulative_pnl)}</td>
-          <td title="${(t.notes || "").replace(/"/g, "&quot;")}">${(t.notes || "").slice(0, 40)}</td>
+          <td class="num ${signClass(t.cumulative_pnl)}">${money(t.cumulative_pnl)}</td>
+          <td class="cam">${t.file_id ? "📷" : ""}</td>
         </tr>`;
       }).join("");
-      tbody.innerHTML = rows;
+
+      tbody.querySelectorAll("tr").forEach(tr => tr.onclick = () => {
+        const t = trades.find(x => x.index === Number(tr.dataset.index));
+        if (t) openModal(t);
+      });
     }
 
+    function openModal(t) {
+      const outcome = t.outcome || "unknown";
+      const items = [
+        ["Result", outcome], ["P&L", money(t.pnl_amount)], ["R multiple", fmt(t.r_multiple)],
+        ["Pips", fmt(t.pips)], ["Lot size", fmt(t.lot_size)],
+        ["Entry", fmt(t.entry_price)], ["Exit", fmt(t.exit_price)],
+      ].filter(([, v]) => v !== "—");
+
+      document.getElementById("modalBody").innerHTML = `
+        <h3>${esc(t.instrument || "Trade")} ${esc((t.direction || "").toUpperCase())}
+          <span class="pill ${outcome}">${outcome}</span></h3>
+        <div class="meta">
+          ${t.trader ? `<span class="trader-chip">${esc(t.trader)}</span> · ` : ""}
+          ${esc(t.date || "")} · logged ${esc((t.logged_at || "").replace("T", " ").slice(0, 16))}
+        </div>
+        ${t.file_id ? `<img src="/api/image/${encodeURIComponent(t.file_id)}" alt="Trade screenshot"
+          onerror="this.style.display='none'" />` : ""}
+        <div class="detail-grid">
+          ${items.map(([k, v]) => `<div class="item"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("")}
+        </div>
+        ${t.analysis ? `<div class="analysis"><span class="k">Trade analysis</span>${esc(t.analysis)}</div>` : ""}
+        ${t.notes ? `<div class="analysis" style="margin-top:10px"><span class="k">Notes</span>${esc(t.notes)}</div>` : ""}
+      `;
+      document.getElementById("overlay").classList.add("open");
+    }
+
+    document.getElementById("modalClose").onclick = () =>
+      document.getElementById("overlay").classList.remove("open");
+    document.getElementById("overlay").onclick = (e) => {
+      if (e.target.id === "overlay") e.target.classList.remove("open");
+    };
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") document.getElementById("overlay").classList.remove("open");
+    });
+
+    /* ---------- Calendar nav ---------- */
+    document.getElementById("calPrev").onclick = () => {
+      state.month = new Date(state.month.getFullYear(), state.month.getMonth() - 1, 1);
+      if (state.data) renderCalendar(state.data.trades);
+    };
+    document.getElementById("calNext").onclick = () => {
+      state.month = new Date(state.month.getFullYear(), state.month.getMonth() + 1, 1);
+      if (state.data) renderCalendar(state.data.trades);
+    };
+
+    /* ---------- Load ---------- */
     async function load() {
       try {
-        const res = await fetch("/api/trades");
+        const url = "/api/trades" + (state.trader ? "?trader=" + encodeURIComponent(state.trader) : "");
+        const res = await fetch(url);
         const s = await res.json();
-        renderKpis(s);
-        renderChart(s.trades);
+        state.data = s;
+
+        if (!state.month) {
+          // Default the calendar to the month of the latest trade, else today.
+          const last = s.trades.length ? s.trades[s.trades.length - 1].date : "";
+          state.month = last
+            ? new Date(Number(last.slice(0, 4)), Number(last.slice(5, 7)) - 1, 1)
+            : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+        }
+
+        // Charts are decorative; never let a chart error block the data views.
+        renderTabs(s.traders || []);
+        try { renderKpis(s); } catch (err) { console.error("kpis", err); }
+        try { renderCalendar(s.trades); } catch (err) { console.error("calendar", err); }
+        try { renderChart(s.trades); } catch (err) { console.error("chart", err); }
         renderTable(s.trades);
         document.getElementById("updated").textContent =
           "Updated " + new Date().toLocaleTimeString();
@@ -190,7 +519,7 @@
     }
 
     load();
-    setInterval(load, 30000); // auto-refresh every 30s
+    setInterval(load, 30000);
   </script>
 </body>
 </html>
