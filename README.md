@@ -1,1 +1,78 @@
-# mt5tradingbot
+# mt5tradingbot — Telegram-powered Trading Journal
+
+Send a screenshot of any trade (profit, loss, or breakeven) to your Telegram
+bot. Claude reads the image, extracts the details, and logs them to a Google
+Sheet — and a live website updates automatically so you can check your
+performance any time.
+
+```
+You send a screenshot ──▶ Telegram bot (webhook)
+        │
+        ▼
+   Claude vision reads it ──▶ { instrument, direction, outcome, P&L, R, notes }
+        │
+        ▼
+   Saved to your Google Sheet
+        │
+        ▼
+   Live dashboard (a real URL you bookmark) — win rate, net P&L, equity curve
+```
+
+## What you get
+- **Automatic logging** — no forms. A screenshot or a one-line text is enough
+  ("XAUUSD buy, +$120, 2R").
+- **A live website** at your Render URL: KPI tiles (net P&L, win rate, profit
+  factor, avg R), an equity curve, and a full trades table. Auto-refreshes.
+- **Your data in a Google Sheet** you fully own and can edit by hand.
+- **Bot commands:** `/stats` for a quick summary, `/undo` to remove the last
+  entry, `/help`.
+
+## Tech
+- **FastAPI** web service (one process) running the Telegram **webhook** and
+  serving the dashboard — a good fit for Render's free tier.
+- **Claude** vision + structured tool use for reliable extraction (`app/analyzer.py`).
+- **Google Sheets** via `gspread` for storage (`app/storage.py`).
+
+## Quick start
+See **[docs/SETUP.md](docs/SETUP.md)** for the full, click-by-click guide
+(Telegram bot, Anthropic key, Google service account, Render deploy).
+
+## Run locally (optional, for testing)
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # then fill in your secrets
+# Expose a public HTTPS URL for Telegram to reach (e.g. ngrok):
+#   ngrok http 8000
+# then set RENDER_EXTERNAL_URL / PUBLIC_URL in .env to that https URL
+uvicorn app.main:app --reload --port 8000
+```
+Open http://localhost:8000 for the dashboard. The Telegram webhook needs a
+public HTTPS URL (a tunnel like ngrok), so the bot side is easiest to test once
+deployed on Render.
+
+## Configuration
+All settings are environment variables — see `.env.example` for the full list
+and `app/config.py` for how they're read. Required: `TELEGRAM_BOT_TOKEN`,
+`ANTHROPIC_API_KEY`, `GOOGLE_SHEET_ID`, `GOOGLE_CREDENTIALS_JSON`.
+
+## Project layout
+```
+app/
+  main.py       FastAPI app: webhook + dashboard + /api/trades
+  bot.py        Telegram update handling (commands, photos, text)
+  analyzer.py   Claude vision → structured trade
+  storage.py    Google Sheets read/write
+  stats.py      Performance metrics + equity curve
+  telegram.py   Telegram Bot API client (webhook mode)
+  config.py     Env-var configuration
+  templates/dashboard.html   The live website
+docs/SETUP.md   Step-by-step setup for a non-developer
+render.yaml     One-click Render deploy
+```
+
+## A note on the "Claude artifact"
+A Claude Artifact is a static page and can't run a bot or fetch live data, so
+the always-updating journal lives at your Render URL (bookmark it on your
+phone). Claude can still generate a one-off artifact snapshot of your stats on
+request — but the live surface is the hosted dashboard.

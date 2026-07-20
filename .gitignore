@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Secrets — never commit these
+.env
+*.credentials.json
+service-account*.json
+google-credentials*.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local data
+*.db
+*.sqlite

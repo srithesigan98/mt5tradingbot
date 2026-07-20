@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Journal</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --surface: #171a21;
+      --surface-2: #1f232c;
+      --border: #2a2f3a;
+      --ink: #e8eaed;
+      --ink-2: #a2a9b4;
+      --muted: #6b7280;
+      --accent: #3b82f6;
+      --good: #22c55e;
+      --bad: #ef4444;
+      --be: #eab308;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e2e5ea;
+        --ink: #14171c; --ink-2: #4b5563; --muted: #8a92a0;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+    h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .kpi .label { color: var(--ink-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .kpi .value { font-size: 24px; font-weight: 650; margin-top: 6px; letter-spacing: -0.02em; }
+    .pos { color: var(--good); } .neg { color: var(--bad); } .neu { color: var(--ink); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+    .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--ink-2); font-weight: 600; }
+    .chart-box { position: relative; height: 300px; }
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 620px; }
+    th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .pill.profit { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+    .pill.loss { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+    .pill.breakeven { background: color-mix(in srgb, var(--be) 20%, transparent); color: var(--be); }
+    .pill.unknown { background: var(--surface-2); color: var(--ink-2); }
+    .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+    .refresh { color: var(--muted); font-size: 12px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>📈 Trading Journal</h1>
+        <div class="sub">Auto-updated from your Telegram bot</div>
+      </div>
+      <div class="refresh" id="updated"></div>
+    </header>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="card">
+      <h2>Equity curve (cumulative P&amp;L)</h2>
+      <div class="chart-box"><canvas id="equity"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h2>Trades</h2>
+      <div class="table-scroll"><table id="table">
+        <thead><tr>
+          <th>#</th><th>Logged</th><th>Instrument</th><th>Dir</th><th>Result</th>
+          <th class="num">P&amp;L</th><th class="num">Pips</th><th class="num">R</th>
+          <th class="num">Cumulative</th><th>Notes</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table></div>
+      <div class="empty" id="empty" style="display:none">
+        No trades yet. Send a screenshot to your Telegram bot to get started.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+    const fmt = (n) => (n === null || n === undefined || n === "") ? "—"
+      : (typeof n === "number" ? (Number.isInteger(n) ? n : n.toFixed(2)) : n);
+    const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neu");
+
+    let chart;
+
+    function renderKpis(s) {
+      const cur = "";
+      const pf = s.profit_factor === null ? "—" : s.profit_factor;
+      const avgR = s.avg_r === null ? "—" : s.avg_r;
+      const kpis = [
+        { label: "Net P&L", value: fmt(s.net_pnl), cls: signClass(s.net_pnl) },
+        { label: "Win rate", value: s.win_rate + "%", cls: "neu" },
+        { label: "Trades", value: `${s.total_trades}`, cls: "neu",
+          sub: `${s.wins}W / ${s.losses}L / ${s.breakeven}BE` },
+        { label: "Profit factor", value: pf, cls: "neu" },
+        { label: "Avg R", value: avgR, cls: "neu" },
+        { label: "Best / Worst", value: `${fmt(s.best_trade)} / ${fmt(s.worst_trade)}`, cls: "neu" },
+      ];
+      document.getElementById("kpis").innerHTML = kpis.map(k => `
+        <div class="kpi">
+          <div class="label">${k.label}</div>
+          <div class="value ${k.cls}">${k.value}</div>
+          ${k.sub ? `<div class="sub">${k.sub}</div>` : ""}
+        </div>`).join("");
+    }
+
+    function renderChart(trades) {
+      const labels = trades.map(t => "#" + t.index);
+      const data = trades.map(t => t.cumulative_pnl);
+      const ctx = document.getElementById("equity");
+      const accent = css("--accent");
+      const grid = css("--border");
+      const ink2 = css("--ink-2");
+
+      const gradient = ctx.getContext("2d").createLinearGradient(0, 0, 0, 300);
+      gradient.addColorStop(0, accent + "44");
+      gradient.addColorStop(1, accent + "00");
+
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: "line",
+        data: { labels, datasets: [{
+          data, borderColor: accent, backgroundColor: gradient,
+          borderWidth: 2, fill: true, tension: 0.25,
+          pointRadius: trades.length > 40 ? 0 : 3, pointBackgroundColor: accent,
+        }]},
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: (c) => "Cumulative: " + fmt(c.parsed.y) } } },
+          scales: {
+            x: { grid: { color: grid }, ticks: { color: ink2, maxTicksLimit: 10 } },
+            y: { grid: { color: grid }, ticks: { color: ink2 } },
+          },
+        },
+      });
+    }
+
+    function renderTable(trades) {
+      const tbody = document.getElementById("tbody");
+      const empty = document.getElementById("empty");
+      if (!trades.length) { empty.style.display = "block"; document.getElementById("table").style.display = "none"; return; }
+      const rows = trades.slice().reverse().map(t => {
+        const when = (t.logged_at || "").replace("T", " ").slice(0, 16);
+        const outcome = (t.outcome || "unknown");
+        return `<tr>
+          <td>${t.index}</td>
+          <td>${when}</td>
+          <td>${t.instrument || "—"}</td>
+          <td>${(t.direction || "").toUpperCase()}</td>
+          <td><span class="pill ${outcome}">${outcome}</span></td>
+          <td class="num ${signClass(t.pnl_amount || 0)}">${fmt(t.pnl_amount)}</td>
+          <td class="num">${fmt(t.pips)}</td>
+          <td class="num">${fmt(t.r_multiple)}</td>
+          <td class="num ${signClass(t.cumulative_pnl)}">${fmt(t.cumulative_pnl)}</td>
+          <td title="${(t.notes || "").replace(/"/g, "&quot;")}">${(t.notes || "").slice(0, 40)}</td>
+        </tr>`;
+      }).join("");
+      tbody.innerHTML = rows;
+    }
+
+    async function load() {
+      try {
+        const res = await fetch("/api/trades");
+        const s = await res.json();
+        renderKpis(s);
+        renderChart(s.trades);
+        renderTable(s.trades);
+        document.getElementById("updated").textContent =
+          "Updated " + new Date().toLocaleTimeString();
+      } catch (e) {
+        document.getElementById("updated").textContent = "Could not load journal.";
+      }
+    }
+
+    load();
+    setInterval(load, 30000); // auto-refresh every 30s
+  </script>
+</body>
+</html>
