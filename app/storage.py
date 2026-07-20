@@ -39,6 +39,10 @@ HEADERS = [
     "trader",
     "telegram_file_id",
     "analysis",
+    # Appended after v2 — richer template fields.
+    "session",
+    "setup",
+    "discipline",
 ]
 
 _worksheet: gspread.Worksheet | None = None
@@ -93,8 +97,11 @@ def _append_sync(trade: dict[str, Any], source: str, trader: str, file_id: str) 
         source,
         trade.get("confidence") if trade.get("confidence") is not None else "",
         trader,
-        file_id,
+        file_id,  # may be comma-separated when several screenshots make one trade
         trade.get("analysis") or "",
+        trade.get("session") or "",
+        trade.get("setup") or "",
+        trade.get("discipline_rating") or "",
     ]
     ws.append_row(row, value_input_option="USER_ENTERED")
 

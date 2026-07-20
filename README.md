@@ -35,6 +35,19 @@ You send a screenshot ──▶ Telegram bot (webhook)
 - **Bot commands:** `/stats` for a quick summary, `/undo` to remove the last
   entry, `/help`.
 
+### Reading your messages accurately
+- Your **written log is the source of truth** — when your caption states entry,
+  exit, SL, TP, profit, outcome, date, etc., the bot uses exactly those values
+  and only uses the screenshot to fill gaps.
+- **Multiple screenshots = one trade.** Send them as a Telegram album and they're
+  combined into a single journal entry (all screenshots viewable in the popup).
+  Multiple entries/partials are compounded into one trade too.
+- Outcome is mapped from your template: **Hit TP → profit, Hit SL → loss,
+  Hit BE → breakeven**, with the P&L sign set to match. "SL 50 pips / TP 50 pips"
+  is treated as your risk setup, not the trade result.
+- Extra template fields (session, setup/strategy, discipline rating) are captured
+  and shown on the dashboard and in the trade popup.
+
 ### How multi-trader works
 Every message carries the sender's Telegram identity. The bot saves that as a
 `trader` column in the sheet and tags the trade with it — no configuration

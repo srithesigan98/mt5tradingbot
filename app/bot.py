@@ -1,6 +1,7 @@
 """Handle incoming Telegram updates: analyze trades and reply."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -8,6 +9,13 @@ from . import analyzer, config, storage, telegram
 from .stats import summarize
 
 log = logging.getLogger("bot")
+
+# When a trader sends several screenshots as one album, Telegram delivers them
+# as separate updates sharing a `media_group_id` (and usually only one carries
+# the caption). We buffer them briefly and process the whole album as ONE trade.
+_MEDIA_GROUP_WAIT = 3.0  # seconds to wait for all photos in an album
+_media_groups: dict[str, dict[str, Any]] = {}
+_MAX_IMAGES = 8
 
 
 def _dashboard_url() -> str:
@@ -49,6 +57,8 @@ def _confirmation(trade: dict[str, Any], trader: str) -> str:
 
     lines = [f"{emoji} <b>Logged {instrument} {direction}</b>".rstrip()]
     lines.append(f"Trader: {trader}")
+    if trade.get("session"):
+        lines.append(f"Session: {trade.get('session')}")
     lines.append(f"Result: <b>{outcome.capitalize()}</b>")
 
     pnl = trade.get("pnl_amount")
@@ -112,13 +122,13 @@ def _largest_photo(message: dict[str, Any]) -> dict[str, Any] | None:
 async def _analyze_and_log(
     chat_id: int,
     caption: str,
-    image_bytes: bytes | None,
+    images: list[bytes],
     source: str,
     trader: str,
-    file_id: str = "",
+    file_ids: list[str] | None = None,
 ) -> None:
     await telegram.send_chat_action(chat_id)
-    trade = await analyzer.analyze(caption, image_bytes, "image/jpeg")
+    trade = await analyzer.analyze(caption, images)
 
     if not trade.get("is_trade_related"):
         await telegram.send_message(
@@ -128,8 +138,34 @@ async def _analyze_and_log(
         )
         return
 
-    await storage.append_trade(trade, source, trader=trader, file_id=file_id)
+    # Keep all screenshot IDs (comma-separated) so the dashboard can show each.
+    file_id_str = ",".join(fid for fid in (file_ids or []) if fid)
+    await storage.append_trade(trade, source, trader=trader, file_id=file_id_str)
     await telegram.send_message(chat_id, _confirmation(trade, trader))
+
+
+async def _flush_media_group(mgid: str) -> None:
+    """After a short debounce, process a buffered album as one trade."""
+    await asyncio.sleep(_MEDIA_GROUP_WAIT)
+    grp = _media_groups.pop(mgid, None)
+    if not grp:
+        return
+    chat_id = grp["chat_id"]
+    file_ids = grp["file_ids"][:_MAX_IMAGES]
+    try:
+        images: list[bytes] = []
+        for fid in file_ids:
+            try:
+                images.append(await telegram.get_file_bytes(fid))
+            except Exception:  # noqa: BLE001 — skip an image we can't download
+                log.exception("Could not download album image %s", fid)
+        await _analyze_and_log(
+            chat_id, grp["caption"], images, source="album",
+            trader=grp["trader"], file_ids=file_ids,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Failed to process album %s", mgid)
+        await _send_error(chat_id, exc)
 
 
 async def handle_update(update: dict[str, Any]) -> None:
@@ -155,16 +191,29 @@ async def handle_update(update: dict[str, Any]) -> None:
 
     photo = _largest_photo(message)
     trader = _trader_name(message)
+    media_group_id = message.get("media_group_id")
+
+    # Album (multiple screenshots for one trade): buffer and process together.
+    if photo and media_group_id:
+        grp = _media_groups.get(media_group_id)
+        if grp is None:
+            grp = {"file_ids": [], "caption": "", "chat_id": chat_id, "trader": trader}
+            _media_groups[media_group_id] = grp
+            asyncio.create_task(_flush_media_group(media_group_id))
+        grp["file_ids"].append(photo["file_id"])
+        if caption and not grp["caption"]:
+            grp["caption"] = caption
+        return
 
     try:
         if photo:
             image_bytes = await telegram.get_file_bytes(photo["file_id"])
             await _analyze_and_log(
-                chat_id, caption, image_bytes, source="photo",
-                trader=trader, file_id=photo["file_id"],
+                chat_id, caption, [image_bytes], source="photo",
+                trader=trader, file_ids=[photo["file_id"]],
             )
         elif text.strip():
-            await _analyze_and_log(chat_id, text, None, source="text", trader=trader)
+            await _analyze_and_log(chat_id, text, [], source="text", trader=trader)
         else:
             await telegram.send_message(
                 chat_id,
@@ -172,20 +221,23 @@ async def handle_update(update: dict[str, Any]) -> None:
             )
     except Exception as exc:  # noqa: BLE001 — surface a friendly error, log the detail
         log.exception("Failed to handle update")
-        # Send a short, safe reason to the chat so problems are diagnosable
-        # without digging through server logs. Error messages from the Anthropic
-        # / Google clients describe the problem (e.g. auth, permission) and do
-        # not contain our secret keys.
-        reason = f"{type(exc).__name__}: {exc}"
-        if len(reason) > 300:
-            reason = reason[:300] + "…"
-        await telegram.send_message(
-            chat_id,
-            "⚠️ Something went wrong reading that.\n\n"
-            f"<b>Reason:</b> <code>{_html_escape(reason)}</code>\n\n"
-            "If this keeps happening, share this message and we'll fix it.",
-        )
+        await _send_error(chat_id, exc)
 
 
 def _html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+async def _send_error(chat_id: int, exc: Exception) -> None:
+    # Send a short, safe reason to the chat so problems are diagnosable without
+    # digging through server logs. Anthropic/Google error messages describe the
+    # problem (auth, permission, etc.) and do not contain our secret keys.
+    reason = f"{type(exc).__name__}: {exc}"
+    if len(reason) > 300:
+        reason = reason[:300] + "…"
+    await telegram.send_message(
+        chat_id,
+        "⚠️ Something went wrong reading that.\n\n"
+        f"<b>Reason:</b> <code>{_html_escape(reason)}</code>\n\n"
+        "If this keeps happening, share this message and we'll fix it.",
+    )

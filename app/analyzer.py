@@ -19,14 +19,14 @@ def _get_client() -> AsyncAnthropic:
     return _client
 
 
-# A strict tool schema forces Claude to return exactly these fields. Nullable
-# fields use a ["type", "null"] union so Claude can leave them blank when a
-# value isn't visible in the screenshot.
+# Nullable fields use a ["type", "null"] union so Claude can leave them blank
+# when a value isn't stated.
 _RECORD_TRADE_TOOL: dict[str, Any] = {
     "name": "record_trade",
     "description": (
-        "Record the details of a single trade extracted from a screenshot "
-        "and/or a text message. Read numbers carefully from the image."
+        "Record the details of ONE trade, extracted from the trader's written "
+        "log and any screenshots. Multiple screenshots and multiple entries all "
+        "belong to the same single trade."
     ),
     "input_schema": {
         "type": "object",
@@ -34,11 +34,11 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
         "properties": {
             "is_trade_related": {
                 "type": "boolean",
-                "description": "True if the message/image is about a specific trade result.",
+                "description": "True if this is about a specific trade result.",
             },
             "instrument": {
                 "type": ["string", "null"],
-                "description": "The symbol traded, e.g. XAUUSD, EURUSD, US30, BTCUSD.",
+                "description": "The symbol traded, e.g. XAUUSD, EURJPY, US30, BTCUSD.",
             },
             "direction": {
                 "type": "string",
@@ -47,105 +47,139 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
             "outcome": {
                 "type": "string",
                 "enum": ["profit", "loss", "breakeven", "unknown"],
-                "description": "Whether the trade won, lost, or closed at breakeven.",
+                "description": (
+                    "Map from the trader's Outcome field: 'Hit TP'/target -> profit; "
+                    "'Hit SL'/stopped out -> loss; 'Hit BE'/breakeven -> breakeven."
+                ),
             },
             "pnl_amount": {
                 "type": ["number", "null"],
-                "description": "Profit/loss in account currency. Negative for a loss.",
+                "description": (
+                    "P&L amount in account currency. The template labels this 'Profit' "
+                    "even for losses — set the SIGN to match the outcome: negative for a "
+                    "loss, positive for a profit, and the stated value (or 0) for breakeven."
+                ),
             },
-            "pnl_currency": {
-                "type": ["string", "null"],
-                "description": "Currency of pnl_amount, e.g. USD.",
-            },
+            "pnl_currency": {"type": ["string", "null"], "description": "e.g. USD."},
             "pips": {
                 "type": ["number", "null"],
-                "description": "Profit/loss in pips or points, if shown. Negative for a loss.",
+                "description": (
+                    "Realized result in pips/points, ONLY if a realized pip result is "
+                    "stated. Do NOT use SL/TP distances (e.g. 'SL 50 pips') here — those "
+                    "are the risk setup, not the result."
+                ),
             },
-            "r_multiple": {
-                "type": ["number", "null"],
-                "description": "Risk multiple (R), e.g. 2.5 for a 2.5R winner.",
-            },
+            "r_multiple": {"type": ["number", "null"], "description": "Risk multiple (R)."},
             "lot_size": {"type": ["number", "null"]},
-            "entry_price": {"type": ["number", "null"]},
+            "entry_price": {
+                "type": ["number", "null"],
+                "description": "Entry price. If several entries, use the average entry.",
+            },
             "exit_price": {"type": ["number", "null"]},
-            "stop_loss": {"type": ["number", "null"]},
-            "take_profit": {"type": ["number", "null"]},
+            "stop_loss": {"type": ["number", "null"], "description": "SL price if a price is given."},
+            "take_profit": {"type": ["number", "null"], "description": "TP price if a price is given."},
             "trade_date": {
                 "type": ["string", "null"],
-                "description": "Date of the trade in YYYY-MM-DD if visible, else null.",
+                "description": (
+                    "Trade date normalized to YYYY-MM-DD. Dates are day-first "
+                    "(D/M/YYYY), e.g. 20/7/2026 -> 2026-07-20."
+                ),
+            },
+            "session": {
+                "type": ["string", "null"],
+                "description": "Trading session / time, e.g. 'London / 1530'.",
+            },
+            "setup": {
+                "type": ["string", "null"],
+                "description": "The direction & setup / strategy, e.g. 'BUY / Striker Zones M30 signal'.",
+            },
+            "discipline_rating": {
+                "type": ["string", "null"],
+                "description": "The discipline rating exactly as written, e.g. '1/3'.",
             },
             "notes": {
                 "type": ["string", "null"],
-                "description": "Any extra context, strategy, or the user's own words.",
+                "description": "The trader's own Notes text (and any psychology/rules answers).",
             },
             "analysis": {
                 "type": "string",
                 "description": (
-                    "A 2-4 sentence explanation of this trade for the journal: what "
-                    "was traded, what happened, and one constructive observation "
-                    "(e.g. about risk management or execution). Plain language."
+                    "A 2-4 sentence explanation of this trade for the journal: the setup, "
+                    "what happened, and one constructive observation on execution or risk. "
+                    "Plain language."
                 ),
             },
             "confidence": {
                 "type": "number",
-                "description": "Your confidence 0-1 that the extracted numbers are correct.",
+                "description": "Confidence 0-1 that the extracted details are correct.",
             },
         },
         "required": [
-            "is_trade_related",
-            "instrument",
-            "direction",
-            "outcome",
-            "pnl_amount",
-            "pnl_currency",
-            "pips",
-            "r_multiple",
-            "lot_size",
-            "entry_price",
-            "exit_price",
-            "stop_loss",
-            "take_profit",
-            "trade_date",
-            "notes",
-            "analysis",
-            "confidence",
+            "is_trade_related", "instrument", "direction", "outcome",
+            "pnl_amount", "pnl_currency", "pips", "r_multiple", "lot_size",
+            "entry_price", "exit_price", "stop_loss", "take_profit",
+            "trade_date", "session", "setup", "discipline_rating",
+            "notes", "analysis", "confidence",
         ],
     },
 }
 
 _SYSTEM_PROMPT = (
-    "You are a meticulous trading-journal assistant. You receive a screenshot "
-    "of a trade (from MetaTrader 5, a broker app, TradingView, etc.) and/or a "
-    "short text message, and you extract the trade result. Read every number "
-    "directly from the image — do not guess prices you cannot see. If the "
-    "message is clearly not about a specific trade result (a greeting, a "
-    "question, general chat), set is_trade_related to false. Always call the "
-    "record_trade tool."
+    "You are a meticulous trading-journal assistant for a trader who logs each "
+    "trade with a written template plus one or more screenshots.\n\n"
+    "CRITICAL RULES:\n"
+    "1. The trader's WRITTEN TEXT is the authoritative source for every detail "
+    "(instrument, direction, entry, exit, SL, TP, profit, outcome, date, session, "
+    "setup, notes). When the text states a value, use exactly that value. Use the "
+    "screenshots only to fill gaps the text doesn't mention, or to confirm.\n"
+    "2. You may receive MULTIPLE screenshots — they all describe the SAME single "
+    "trade. Never split them into multiple trades.\n"
+    "3. If multiple entries or partial positions appear, COMPOUND them into ONE "
+    "trade (average the entry price; it is still a single trade).\n"
+    "4. Outcome: 'Hit TP'/target -> profit; 'Hit SL'/stopped out -> loss; "
+    "'Hit BE'/breakeven/moved to BE -> breakeven. Make pnl_amount's sign match.\n"
+    "5. 'SL 50 pips' / 'TP 50 pips' are the risk setup (distances), NOT the "
+    "realized result — never record them as the trade's pip result.\n"
+    "6. Normalize dates to YYYY-MM-DD, interpreting them day-first (20/7/2026 -> "
+    "2026-07-20).\n"
+    "7. If the content is clearly not a trade (a greeting or question), set "
+    "is_trade_related=false.\n"
+    "Always call the record_trade tool."
 )
 
 
-async def analyze(caption: str, image_bytes: bytes | None, image_media_type: str) -> dict[str, Any]:
-    """Analyze a message + optional image and return the record_trade input dict."""
+async def analyze(
+    caption: str,
+    images: list[bytes] | None = None,
+    image_media_type: str = "image/jpeg",
+) -> dict[str, Any]:
+    """Analyze a written log + any screenshots (all one trade) -> record_trade dict."""
+    images = images or []
     content: list[dict[str, Any]] = []
 
-    if image_bytes:
+    for img in images:
         content.append(
             {
                 "type": "image",
                 "source": {
                     "type": "base64",
                     "media_type": image_media_type,
-                    "data": base64.standard_b64encode(image_bytes).decode("utf-8"),
+                    "data": base64.standard_b64encode(img).decode("utf-8"),
                 },
             }
         )
 
-    text = caption.strip() if caption else ""
-    if not text and image_bytes:
-        text = "Extract the trade result from this screenshot."
-    elif image_bytes:
-        text = f"Message from the trader: {text}\n\nExtract the trade result from the screenshot and message."
-    content.append({"type": "text", "text": text or "Extract the trade result from this message."})
+    text = (caption or "").strip()
+    if images and text:
+        prompt = (
+            f"The trader sent {len(images)} screenshot(s) and this written log "
+            f"(the log is authoritative):\n\n{text}\n\nExtract the single trade."
+        )
+    elif images:
+        prompt = f"The trader sent {len(images)} screenshot(s) for one trade. Extract the trade."
+    else:
+        prompt = f"The trader wrote:\n\n{text}\n\nExtract the single trade."
+    content.append({"type": "text", "text": prompt})
 
     response = await _get_client().messages.create(
         model=config.ANTHROPIC_MODEL,

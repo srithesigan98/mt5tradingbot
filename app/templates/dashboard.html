@@ -434,7 +434,7 @@
           <td class="num ${signClass(t.pnl_amount || 0)}">${money(t.pnl_amount)}</td>
           <td class="num">${fmt(t.r_multiple)}</td>
           <td class="num ${signClass(t.cumulative_pnl)}">${money(t.cumulative_pnl)}</td>
-          <td class="cam">${t.file_id ? "📷" : ""}</td>
+          <td class="cam">${(t.file_ids && t.file_ids.length) ? "📷" + (t.file_ids.length > 1 ? "×" + t.file_ids.length : "") : ""}</td>
         </tr>`;
       }).join("");
 
@@ -450,7 +450,12 @@
         ["Result", outcome], ["P&L", money(t.pnl_amount)], ["R multiple", fmt(t.r_multiple)],
         ["Pips", fmt(t.pips)], ["Lot size", fmt(t.lot_size)],
         ["Entry", fmt(t.entry_price)], ["Exit", fmt(t.exit_price)],
+        ["Session", t.session || "—"], ["Setup", t.setup || "—"], ["Discipline", t.discipline || "—"],
       ].filter(([, v]) => v !== "—");
+
+      const imgs = (t.file_ids || []).map(fid =>
+        `<img src="/api/image/${encodeURIComponent(fid)}" alt="Trade screenshot"
+          onerror="this.style.display='none'" />`).join("");
 
       document.getElementById("modalBody").innerHTML = `
         <h3>${esc(t.instrument || "Trade")} ${esc((t.direction || "").toUpperCase())}
@@ -459,8 +464,7 @@
           ${t.trader ? `<span class="trader-chip">${esc(t.trader)}</span> · ` : ""}
           ${esc(t.date || "")} · logged ${esc((t.logged_at || "").replace("T", " ").slice(0, 16))}
         </div>
-        ${t.file_id ? `<img src="/api/image/${encodeURIComponent(t.file_id)}" alt="Trade screenshot"
-          onerror="this.style.display='none'" />` : ""}
+        ${imgs}
         <div class="detail-grid">
           ${items.map(([k, v]) => `<div class="item"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join("")}
         </div>

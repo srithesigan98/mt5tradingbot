@@ -82,8 +82,12 @@ def compute(trades: list[dict[str, Any]]) -> dict[str, Any]:
                 "exit_price": row.get("exit_price", ""),
                 "notes": row.get("notes", ""),
                 "trader": str(row.get("trader") or "").strip(),
-                "file_id": str(row.get("telegram_file_id") or "").strip(),
+                # One or more screenshot IDs (comma-separated for albums).
+                "file_ids": [f for f in str(row.get("telegram_file_id") or "").split(",") if f.strip()],
                 "analysis": row.get("analysis", ""),
+                "session": row.get("session", ""),
+                "setup": row.get("setup", ""),
+                "discipline": row.get("discipline", ""),
                 "cumulative_pnl": round(equity, 2),
             }
         )
