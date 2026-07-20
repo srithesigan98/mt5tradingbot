@@ -28,7 +28,6 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
         "Record the details of a single trade extracted from a screenshot "
         "and/or a text message. Read numbers carefully from the image."
     ),
-    "strict": True,
     "input_schema": {
         "type": "object",
         "additionalProperties": False,

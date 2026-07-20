@@ -170,9 +170,22 @@ async def handle_update(update: dict[str, Any]) -> None:
                 chat_id,
                 "Send me a screenshot of a trade or describe it in text, and I'll log it. /help for more.",
             )
-    except Exception:  # noqa: BLE001 — surface a friendly error, log the detail
+    except Exception as exc:  # noqa: BLE001 — surface a friendly error, log the detail
         log.exception("Failed to handle update")
+        # Send a short, safe reason to the chat so problems are diagnosable
+        # without digging through server logs. Error messages from the Anthropic
+        # / Google clients describe the problem (e.g. auth, permission) and do
+        # not contain our secret keys.
+        reason = f"{type(exc).__name__}: {exc}"
+        if len(reason) > 300:
+            reason = reason[:300] + "…"
         await telegram.send_message(
             chat_id,
-            "⚠️ Something went wrong reading that. Please try again in a moment.",
+            "⚠️ Something went wrong reading that.\n\n"
+            f"<b>Reason:</b> <code>{_html_escape(reason)}</code>\n\n"
+            "If this keeps happening, share this message and we'll fix it.",
         )
+
+
+def _html_escape(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
