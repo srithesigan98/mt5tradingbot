@@ -76,11 +76,24 @@ That's it — the bot can now write to your sheet.
 
 ## Part 4 — Invent a webhook secret
 
-Any random string works. It secures the URL Telegram posts to.
-Run this locally, or just make one up (letters/numbers, no spaces):
-```
-python -c "import secrets; print(secrets.token_urlsafe(24))"
-```
+This is just a random string you make up. It secures the URL Telegram posts to
+so strangers can't send fake updates to your bot. It's not a password to any
+account — you only paste it into Render in Part 5.
+
+**Easiest: type any random mix of 20+ letters and numbers yourself**, e.g. in
+the style of `Kx9mT2vQ8pLzR4wNc7yB1sJd` (make your own — don't copy an example).
+Stick to letters, numbers, `-` and `_` (no spaces or symbols like `/ ? # %`,
+since it becomes part of a URL).
+
+Alternatives:
+- Use any password generator (browser, 1Password, Bitwarden…) with symbols
+  turned off.
+- If you have Python installed, open a terminal on your computer
+  (Windows: Start → type `cmd`; Mac: the Terminal app) and run:
+  ```
+  python -c "import secrets; print(secrets.token_urlsafe(24))"
+  ```
+
 → **Secret #2: `WEBHOOK_SECRET`**
 
 ---
