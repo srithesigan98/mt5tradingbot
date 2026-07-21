@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -21,6 +22,24 @@ ANTHROPIC_MODEL = _clean(os.getenv("ANTHROPIC_MODEL")) or "claude-sonnet-5"
 GOOGLE_SHEET_ID = _clean(os.getenv("GOOGLE_SHEET_ID"))
 GOOGLE_CREDENTIALS_JSON = _clean(os.getenv("GOOGLE_CREDENTIALS_JSON"))
 WORKSHEET_NAME = _clean(os.getenv("WORKSHEET_NAME")) or "Trades"
+
+# Timezone for journal timestamps and "today" defaulting. Malaysia (UTC+8) has
+# no daylight saving, so a fixed offset is exact. Override with UTC_OFFSET_HOURS.
+try:
+    UTC_OFFSET_HOURS = float(_clean(os.getenv("UTC_OFFSET_HOURS")) or "8")
+except ValueError:
+    UTC_OFFSET_HOURS = 8.0
+LOCAL_TZ = timezone(timedelta(hours=UTC_OFFSET_HOURS))
+
+
+def now_local() -> datetime:
+    """Current time in the journal's configured timezone."""
+    return datetime.now(LOCAL_TZ)
+
+
+def today_local_iso() -> str:
+    """Today's date (YYYY-MM-DD) in the journal's timezone."""
+    return now_local().date().isoformat()
 
 # Render sets RENDER_EXTERNAL_URL automatically. For local testing you can set
 # it to your tunnel URL (e.g. an ngrok https URL).

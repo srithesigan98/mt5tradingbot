@@ -141,7 +141,8 @@ _SYSTEM_PROMPT = (
     "5. 'SL 50 pips' / 'TP 50 pips' are the risk setup (distances), NOT the "
     "realized result — never record them as the trade's pip result.\n"
     "6. Normalize dates to YYYY-MM-DD, interpreting them day-first (20/7/2026 -> "
-    "2026-07-20).\n"
+    "2026-07-20). If the trader does NOT state a date, use today's date (it is "
+    "provided in the user message).\n"
     "7. If the content is clearly not a trade (a greeting or question), set "
     "is_trade_related=false.\n"
     "Always call the record_trade tool."
@@ -179,6 +180,7 @@ async def analyze(
         prompt = f"The trader sent {len(images)} screenshot(s) for one trade. Extract the trade."
     else:
         prompt = f"The trader wrote:\n\n{text}\n\nExtract the single trade."
+    prompt += f"\n\n(Today's date in the trader's timezone is {config.today_local_iso()}.)"
     content.append({"type": "text", "text": prompt})
 
     response = await _get_client().messages.create(

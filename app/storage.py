@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from datetime import datetime, timezone
 from typing import Any
 
 import gspread
@@ -79,7 +78,7 @@ def _get_worksheet() -> gspread.Worksheet:
 def _append_sync(trade: dict[str, Any], source: str, trader: str, file_id: str) -> None:
     ws = _get_worksheet()
     row = [
-        datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        config.now_local().isoformat(timespec="seconds"),
         trade.get("trade_date") or "",
         trade.get("instrument") or "",
         trade.get("direction") or "",
