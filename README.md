@@ -21,10 +21,17 @@ You send a screenshot ──▶ Telegram bot (webhook)
 ## What you get
 - **Automatic logging** — no forms. A screenshot or a one-line text is enough
   ("XAUUSD buy, +$120, 2R").
-- **A TradeZella-style dashboard** at your Render URL: KPI cards with win-rate
-  and profit-factor gauges, trade expectancy, avg win/loss, a **monthly P&L
-  calendar** (green/red day cells + weekly totals), an equity curve, and a
-  trades table. Auto-refreshes every 30s.
+- **A TradeZella-style dashboard** at your Render URL with three analysis views:
+  - **Performance Summary** — KPI cards (win-rate & profit-factor gauges,
+    expectancy, avg win/loss), day-of-week tiles (best/least performing, most
+    active, best win rate), a performance-score radar, a monthly P&L calendar
+    (green/red day cells + weekly totals), and an equity curve.
+  - **Customizable Charts** — group by instrument / day / direction / session,
+    charted by Net P&L, trade count, win %, or avg R.
+  - **Cross Analysis** — an instrument × month P&L heatmap.
+  - Auto-refreshes every 30s.
+- **Live TradingView chart** in each trade's popup (symbol auto-mapped, e.g.
+  XAUUSD → OANDA:XAUUSD).
 - **Multiple traders** — share the bot with someone else and each person's
   trades are tagged with their Telegram username. The dashboard has
   **per-trader tabs** (All / you / them) that recompute every stat, and
