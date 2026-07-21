@@ -79,10 +79,15 @@ def _confirmation(trade: dict[str, Any], trader: str) -> str:
     return "\n".join(lines)
 
 
-async def _handle_command(chat_id: int, text: str) -> bool:
+async def _handle_command(chat_id: int, text: str, trader: str = "") -> bool:
     cmd = text.split()[0].lower().lstrip("/").split("@")[0]
 
     if cmd in ("start", "help"):
+        # Auto-subscribe to news on /start.
+        try:
+            await storage.add_subscriber(chat_id, trader)
+        except Exception:  # noqa: BLE001
+            log.exception("subscribe on start failed")
         await telegram.send_message(
             chat_id,
             "👋 <b>Trading Journal Bot</b>\n\n"
@@ -91,7 +96,11 @@ async def _handle_command(chat_id: int, text: str) -> bool:
             "it and log it to your journal automatically.\n\n"
             "<b>Commands</b>\n"
             "/stats — quick performance summary\n"
-            "/undo — remove the last logged trade\n\n"
+            "/news — upcoming high-impact US events\n"
+            "/undo — remove the last logged trade\n"
+            "/unsubscribe — stop high-impact US news alerts\n\n"
+            "🔔 You're subscribed to <b>high-impact US news alerts</b> (USD &amp; Gold "
+            "analysis before and after each release).\n\n"
             f"📊 Your live journal:\n{_dashboard_url()}",
         )
         return True
@@ -107,6 +116,31 @@ async def _handle_command(chat_id: int, text: str) -> bool:
             chat_id,
             "🗑️ Removed the last logged trade." if removed else "Nothing to undo — your journal is empty.",
         )
+        return True
+
+    if cmd in ("subscribe", "sub"):
+        await storage.add_subscriber(chat_id, trader)
+        await telegram.send_message(chat_id, "🔔 Subscribed to high-impact US news alerts.")
+        return True
+
+    if cmd in ("unsubscribe", "unsub", "stop"):
+        await storage.remove_subscriber(chat_id)
+        await telegram.send_message(chat_id, "🔕 Unsubscribed from news alerts. Send /subscribe to turn them back on.")
+        return True
+
+    if cmd == "news":
+        from . import news
+        events = await news.upcoming(limit=10)
+        if not events:
+            await telegram.send_message(chat_id, "No upcoming high-impact US events found for this week.")
+        else:
+            lines = ["🇺🇸 <b>Upcoming high-impact US events</b>\n"]
+            for e in events:
+                fc = f" · F: {e['forecast']}" if e["forecast"] else ""
+                pv = f" · P: {e['previous']}" if e["previous"] else ""
+                lines.append(f"• <b>{_html_escape(e['title'])}</b>\n  {e['time_local']}{fc}{pv}")
+            lines.append("\nYou'll get an alert with USD &amp; Gold analysis before and after each.")
+            await telegram.send_message(chat_id, "\n".join(lines))
         return True
 
     return False
@@ -141,6 +175,11 @@ async def _analyze_and_log(
     # Keep all screenshot IDs (comma-separated) so the dashboard can show each.
     file_id_str = ",".join(fid for fid in (file_ids or []) if fid)
     await storage.append_trade(trade, source, trader=trader, file_id=file_id_str)
+    # Active traders are auto-subscribed to news alerts (opt out with /unsubscribe).
+    try:
+        await storage.add_subscriber(chat_id, trader)
+    except Exception:  # noqa: BLE001
+        log.exception("auto-subscribe on trade failed")
     await telegram.send_message(chat_id, _confirmation(trade, trader))
 
 
@@ -183,14 +222,14 @@ async def handle_update(update: dict[str, Any]) -> None:
 
     text = message.get("text", "") or ""
     caption = message.get("caption", "") or ""
+    trader = _trader_name(message)
 
     # Commands
     if text.startswith("/"):
-        if await _handle_command(chat_id, text):
+        if await _handle_command(chat_id, text, trader):
             return
 
     photo = _largest_photo(message)
-    trader = _trader_name(message)
     media_group_id = message.get("media_group_id")
 
     # Album (multiple screenshots for one trade): buffer and process together.

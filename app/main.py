@@ -115,6 +115,27 @@ async def api_image(file_id: str) -> Response:
     )
 
 
+@app.get("/api/news")
+async def api_news() -> JSONResponse:
+    from . import news
+    events = await news.upcoming(limit=15)
+    return JSONResponse({"events": events, "embed_url": config.ECON_CALENDAR_EMBED_URL})
+
+
+@app.api_route("/cron/news/{secret}", methods=["GET", "POST"])
+async def cron_news(secret: str) -> JSONResponse:
+    """Hit this every ~5 min from a free cron pinger to fire due news alerts."""
+    if secret != config.WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="invalid secret")
+    from . import news
+    try:
+        result = await news.run_check()
+    except Exception as exc:  # noqa: BLE001 — keep the pinger from seeing 500s
+        log.exception("news check failed")
+        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return JSONResponse(result)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     return _TEMPLATES.TemplateResponse(request, "dashboard.html", {})

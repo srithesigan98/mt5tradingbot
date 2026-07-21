@@ -32,6 +32,13 @@ You send a screenshot ──▶ Telegram bot (webhook)
   - Auto-refreshes every 30s.
 - **Live TradingView chart** in each trade's popup (symbol auto-mapped, e.g.
   XAUUSD → OANDA:XAUUSD).
+- **High-impact US news alerts** — before and after each high-impact US release
+  (NFP, CPI, FOMC…), the bot broadcasts a Claude fundamental read with a **USD
+  bias and Gold bias**. Users auto-subscribe on `/start` or when logging a trade;
+  `/unsubscribe` to opt out, `/news` for the upcoming schedule. The dashboard has
+  an **Economic Calendar** tab (this-week high-impact list + Myfxbook embed).
+  Alerts are driven by a secured `/cron/news/<secret>` endpoint pinged every
+  ~5 min by a free scheduler (see docs/SETUP.md Part 6).
 - **Multiple traders** — share the bot with someone else and each person's
   trades are tagged with their Telegram username. The dashboard has
   **per-trader tabs** (All / you / them) that recompute every stat, and

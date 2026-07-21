@@ -150,6 +150,7 @@
       <button class="viewtab active" data-view="summary">Performance Summary</button>
       <button class="viewtab" data-view="charts">Customizable Charts</button>
       <button class="viewtab" data-view="cross">Cross Analysis</button>
+      <button class="viewtab" data-view="calendar">Economic Calendar</button>
     </div>
 
     <!-- Performance Summary -->
@@ -201,6 +202,25 @@
       <div class="card">
         <h2 id="crossTitle">Instrument × Month — Net P&amp;L</h2>
         <div class="heat-scroll"><table class="heat" id="heat"></table></div>
+      </div>
+    </div>
+
+    <!-- Economic Calendar -->
+    <div id="view-calendar" style="display:none">
+      <div class="card">
+        <h2>🇺🇸 This week — high-impact US events</h2>
+        <div id="newsList"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h2>Economic calendar (Myfxbook)</h2>
+        <div style="border-radius:12px;overflow:hidden;border:1px solid var(--border)">
+          <iframe id="calFrame" src="" style="width:100%;height:560px;border:0" loading="lazy"></iframe>
+        </div>
+        <div style="color:var(--muted);font-size:12px;margin-top:8px">
+          If the embedded calendar is blank, some providers block framing — the
+          high-impact list above always works. Source:
+          <a id="calLink" href="#" target="_blank" rel="noopener">Myfxbook</a>.
+        </div>
       </div>
     </div>
 
@@ -488,19 +508,39 @@
     document.getElementById("overlay").onclick = (e) => { if (e.target.id === "overlay") e.target.classList.remove("open"); };
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.getElementById("overlay").classList.remove("open"); });
 
+    /* ---------- Economic calendar ---------- */
+    let _newsLoaded = false;
+    async function renderNews() {
+      const list = document.getElementById("newsList");
+      try {
+        const d = await (await fetch("/api/news")).json();
+        const frame = document.getElementById("calFrame"), link = document.getElementById("calLink");
+        if (d.embed_url && frame.src !== d.embed_url) { frame.src = d.embed_url; link.href = d.embed_url; }
+        if (!d.events || !d.events.length) { list.innerHTML = `<div class="empty">No high-impact US events found for this week.</div>`; return; }
+        list.innerHTML = d.events.map(e => `
+          <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+            <div><div style="font-weight:700">${esc(e.title)}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(e.time_local)}</div></div>
+            <div style="text-align:right;font-size:12px;color:var(--ink-2);white-space:nowrap">
+              ${e.forecast ? `Forecast <b>${esc(e.forecast)}</b><br>` : ""}${e.previous ? `Prev ${esc(e.previous)}` : ""}
+            </div>
+          </div>`).join("");
+      } catch (e) { list.innerHTML = `<div class="empty">Couldn't load events.</div>`; }
+    }
+
     /* ---------- View switching ---------- */
     function setView(v) {
       state.view = v;
       document.querySelectorAll(".viewtab").forEach(b => b.classList.toggle("active", b.dataset.view === v));
-      document.getElementById("view-summary").style.display = v === "summary" ? "" : "none";
-      document.getElementById("view-charts").style.display = v === "charts" ? "" : "none";
-      document.getElementById("view-cross").style.display = v === "cross" ? "" : "none";
+      ["summary", "charts", "cross", "calendar"].forEach(k =>
+        document.getElementById("view-" + k).style.display = k === v ? "" : "none");
       if (state.data) renderView(state.data.trades);
     }
     function renderView(trades) {
       if (state.view === "summary") { renderDayTiles(trades); if (state.data) renderRadar(state.data, trades); if (!state.month) return; renderCalendar(trades); renderEquity(trades); }
       else if (state.view === "charts") renderCustom(trades);
       else if (state.view === "cross") renderCross(trades);
+      else if (state.view === "calendar") { if (!_newsLoaded) { _newsLoaded = true; } renderNews(); }
     }
     document.querySelectorAll(".viewtab").forEach(b => b.onclick = () => setView(b.dataset.view));
     document.getElementById("groupBy").onchange = (e) => { state.groupBy = e.target.value; if (state.data) renderCustom(state.data.trades); };

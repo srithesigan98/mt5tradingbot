@@ -124,6 +124,25 @@ Alternatives:
 
 ---
 
+## Part 6 — Turn on high-impact US news alerts (2 min)
+
+The bot can message everyone before and after high-impact US economic releases
+(NFP, CPI, FOMC, etc.) with a USD & Gold read. Because Render's free service
+sleeps, a free external "pinger" wakes it every few minutes to check the
+calendar. Set it up once:
+
+1. Go to **https://cron-job.org** and sign up (free).
+2. Create a new cron job with:
+   - **URL:** `https://YOUR-RENDER-URL.onrender.com/cron/news/YOUR_WEBHOOK_SECRET`
+     (use your real Render URL and the same `WEBHOOK_SECRET` from Part 4)
+   - **Schedule:** every **5 minutes**
+3. Save. That's it — the bot now fires alerts on schedule.
+
+Users are auto-subscribed when they `/start` the bot or log a trade. Anyone can
+`/unsubscribe` (and `/subscribe` to opt back in), and `/news` shows the upcoming
+schedule. To alert on other countries too, set `NEWS_COUNTRIES` in Render (e.g.
+`USD,EUR,GBP`).
+
 ## Notes on Render's free tier
 The free web service **sleeps after ~15 min of no traffic**. Because we use
 webhook mode, the next screenshot you send wakes it automatically (Telegram

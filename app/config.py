@@ -46,6 +46,23 @@ def today_local_iso() -> str:
 PUBLIC_URL = _clean(os.getenv("RENDER_EXTERNAL_URL") or os.getenv("PUBLIC_URL"))
 
 
+# --- Economic-news alerts ------------------------------------------------
+# Machine-readable calendar feed used for the alert engine (has impact +
+# forecast/actual). Forex Factory's free weekly JSON by default.
+NEWS_FEED_URL = _clean(os.getenv("NEWS_FEED_URL")) or "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+# Countries to alert on (Forex Factory uses currency codes; USA = "USD").
+NEWS_COUNTRIES = {c for c in (_clean(os.getenv("NEWS_COUNTRIES")) or "USD").replace(" ", "").split(",") if c}
+try:
+    NEWS_LOOKAHEAD_MIN = int(_clean(os.getenv("NEWS_LOOKAHEAD_MIN")) or "15")
+except ValueError:
+    NEWS_LOOKAHEAD_MIN = 15
+# Visual calendar embedded on the dashboard (Myfxbook by default).
+ECON_CALENDAR_EMBED_URL = (
+    _clean(os.getenv("ECON_CALENDAR_EMBED_URL"))
+    or "https://www.myfxbook.com/economic-calendar"
+)
+
+
 def _parse_ids(raw: str) -> set[int]:
     ids: set[int] = set()
     for part in raw.replace(" ", "").split(","):

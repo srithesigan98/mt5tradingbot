@@ -44,35 +44,43 @@ HEADERS = [
     "discipline",
 ]
 
-_worksheet: gspread.Worksheet | None = None
+# Secondary worksheets for the news-alert feature.
+SUBSCRIBER_HEADERS = ["chat_id", "name", "subscribed_at"]
+NEWSLOG_HEADERS = ["key", "event", "notified_at"]
+
+_spreadsheet = None  # cached gspread Spreadsheet
+_ws_cache: dict[str, gspread.Worksheet] = {}
 _lock = threading.Lock()
 
 
-def _get_worksheet() -> gspread.Worksheet:
-    """Open (and cache) the worksheet, ensuring the header row exists."""
-    global _worksheet
-    with _lock:
-        if _worksheet is not None:
-            return _worksheet
-
+def _get_spreadsheet():
+    global _spreadsheet
+    if _spreadsheet is None:
         info = json.loads(config.GOOGLE_CREDENTIALS_JSON)
         creds = Credentials.from_service_account_info(info, scopes=_SCOPES)
-        client = gspread.authorize(creds)
-        spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
+        _spreadsheet = gspread.authorize(creds).open_by_key(config.GOOGLE_SHEET_ID)
+    return _spreadsheet
 
+
+def _get_ws(name: str, headers: list[str]) -> gspread.Worksheet:
+    """Open (and cache) a worksheet by name, ensuring its header row exists."""
+    with _lock:
+        if name in _ws_cache:
+            return _ws_cache[name]
+        ss = _get_spreadsheet()
         try:
-            ws = spreadsheet.worksheet(config.WORKSHEET_NAME)
+            ws = ss.worksheet(name)
         except gspread.WorksheetNotFound:
-            ws = spreadsheet.add_worksheet(
-                title=config.WORKSHEET_NAME, rows=1000, cols=len(HEADERS)
-            )
-
+            ws = ss.add_worksheet(title=name, rows=1000, cols=max(len(headers), 4))
         existing = ws.row_values(1)
-        if existing != HEADERS:
-            ws.update([HEADERS], "A1")
-
-        _worksheet = ws
+        if existing != headers:
+            ws.update([headers], "A1")
+        _ws_cache[name] = ws
         return ws
+
+
+def _get_worksheet() -> gspread.Worksheet:
+    return _get_ws(config.WORKSHEET_NAME, HEADERS)
 
 
 def _append_sync(trade: dict[str, Any], source: str, trader: str, file_id: str) -> None:
@@ -129,3 +137,60 @@ async def read_trades() -> list[dict[str, Any]]:
 
 async def delete_last_trade() -> bool:
     return await asyncio.to_thread(_delete_last_sync)
+
+
+# --- Subscribers (for news broadcasts) -----------------------------------
+
+def _add_subscriber_sync(chat_id: int, name: str) -> None:
+    ws = _get_ws("Subscribers", SUBSCRIBER_HEADERS)
+    existing = {str(r.get("chat_id")) for r in ws.get_all_records()}
+    if str(chat_id) in existing:
+        return
+    ws.append_row([str(chat_id), name, config.now_local().isoformat(timespec="seconds")],
+                  value_input_option="USER_ENTERED")
+
+
+def _remove_subscriber_sync(chat_id: int) -> bool:
+    ws = _get_ws("Subscribers", SUBSCRIBER_HEADERS)
+    values = ws.get_all_values()
+    for i, row in enumerate(values[1:], start=2):  # skip header; 1-based rows
+        if row and row[0] == str(chat_id):
+            ws.delete_rows(i)
+            return True
+    return False
+
+
+def _list_subscriber_ids_sync() -> list[int]:
+    ws = _get_ws("Subscribers", SUBSCRIBER_HEADERS)
+    ids: list[int] = []
+    for r in ws.get_all_records():
+        try:
+            ids.append(int(r.get("chat_id")))
+        except (TypeError, ValueError):
+            pass
+    return ids
+
+
+async def add_subscriber(chat_id: int, name: str = "") -> None:
+    await asyncio.to_thread(_add_subscriber_sync, chat_id, name)
+
+
+async def remove_subscriber(chat_id: int) -> bool:
+    return await asyncio.to_thread(_remove_subscriber_sync, chat_id)
+
+
+def list_subscriber_ids() -> list[int]:
+    return _list_subscriber_ids_sync()
+
+
+# --- News-alert dedup log -------------------------------------------------
+
+def load_notified_keys() -> set[str]:
+    ws = _get_ws("NewsLog", NEWSLOG_HEADERS)
+    return {str(r.get("key")) for r in ws.get_all_records() if r.get("key")}
+
+
+def mark_notified(key: str, event: str) -> None:
+    ws = _get_ws("NewsLog", NEWSLOG_HEADERS)
+    ws.append_row([key, event, config.now_local().isoformat(timespec="seconds")],
+                  value_input_option="USER_ENTERED")
