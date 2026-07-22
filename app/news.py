@@ -96,7 +96,13 @@ def _local_str(dt: datetime | None) -> str:
 
 # --- Analysis + broadcast -------------------------------------------------
 
-async def analyze(ev: dict[str, Any], phase: str) -> str:
+def _esc(s: Any) -> str:
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+async def analyze(ev: dict[str, Any], phase: str) -> dict[str, Any]:
+    """Returns {html, body, ...meta}. `html` for Telegram; `body` is plain text
+    for the dashboard archive."""
     title = str(ev.get("title") or "US economic event")
     forecast = ev.get("forecast") or "n/a"
     previous = ev.get("previous") or "n/a"
@@ -115,7 +121,7 @@ async def analyze(ev: dict[str, Any], phase: str) -> str:
         tag = f"{impact}-impact US news in ~{config.NEWS_LOOKAHEAD_MIN} min"
     else:
         user = (
-            f"HIGH-impact US event just released.\n"
+            f"{impact}-impact US event just released.\n"
             f"Event: {title}\nActual: {actual}\nForecast: {forecast}\nPrevious: {previous}\n\n"
             "Interpret the result and give the USD and Gold direction now."
         )
@@ -129,14 +135,68 @@ async def analyze(ev: dict[str, Any], phase: str) -> str:
         messages=[{"role": "user", "content": user}],
     )
     body = "".join(b.text for b in resp.content if b.type == "text").strip()
-    esc = lambda s: str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    head = f"{emoji} <b>{esc(title)}</b>\n<i>{tag}</i>\n"
+    head = f"{emoji} <b>{_esc(title)}</b>\n<i>{tag}</i>\n"
     facts = (
-        f"Forecast: {esc(forecast)} · Previous: {esc(previous)}"
+        f"Forecast: {_esc(forecast)} · Previous: {_esc(previous)}"
         if phase == "pre"
-        else f"Actual: <b>{esc(actual)}</b> · Forecast: {esc(forecast)} · Previous: {esc(previous)}"
+        else f"Actual: <b>{_esc(actual)}</b> · Forecast: {_esc(forecast)} · Previous: {_esc(previous)}"
     )
-    return f"{head}{facts}\n\n{esc(body)}"
+    return {
+        "html": f"{head}{facts}\n\n{_esc(body)}",
+        "body": body,
+        "phase": phase,
+        "impact": _impact(ev),
+        "event": title,
+        "actual": (actual if phase == "post" else ""),
+        "forecast": forecast,
+        "previous": previous,
+    }
+
+
+_GOLD_SYSTEM = (
+    "You are a gold (XAU/USD) market analyst writing a short pre-market outlook "
+    "for the trading day. Be practical and specific. Cover the macro backdrop for "
+    "gold right now, which of today's scheduled US events matter most for gold and "
+    "why, and how the day could unfold. 4-6 sentences. Finish with a line "
+    "'Gold bias: <bullish/bearish/neutral> — <short reason>' and then "
+    "'Not financial advice.' Do not invent specific price levels or figures you "
+    "were not given."
+)
+
+
+async def daily_gold_summary(subs: list[int], events: list[dict[str, Any]]) -> str:
+    """Build + broadcast today's gold outlook. Returns the plain-text body."""
+    today = config.now_local().date()
+    todays = []
+    for ev in events:
+        if not is_target(ev):
+            continue
+        dt = _parse_time(ev)
+        if not dt or dt.astimezone(config.LOCAL_TZ).date() != today:
+            continue
+        todays.append(
+            f"- {ev.get('title')} ({_impact(ev)}) at {_local_str(dt)}; "
+            f"forecast {ev.get('forecast') or 'n/a'}, previous {ev.get('previous') or 'n/a'}"
+        )
+    events_txt = "\n".join(todays) if todays else "No major US economic events scheduled today."
+    user = (
+        f"Today is {today}. Scheduled US economic events (local time):\n{events_txt}\n\n"
+        "Write today's pre-market gold outlook."
+    )
+    resp = await _get_client().messages.create(
+        model=config.ANTHROPIC_MODEL,
+        max_tokens=550,
+        system=_GOLD_SYSTEM,
+        messages=[{"role": "user", "content": user}],
+    )
+    body = "".join(b.text for b in resp.content if b.type == "text").strip()
+    html = f"🟡 <b>Daily Gold Outlook — {today}</b>\n\n{_esc(body)}"
+    await _broadcast(subs, html)
+    await storage.log_analysis({
+        "phase": "gold", "impact": "", "event": "Daily gold outlook",
+        "actual": "", "forecast": "", "previous": "", "analysis": body,
+    })
+    return body
 
 
 async def _broadcast(chat_ids: list[int], text: str) -> int:
@@ -179,8 +239,9 @@ async def run_check() -> dict[str, Any]:
         # Heads-up shortly before the release.
         pre_key = f"{title}|{stamp}|pre"
         if 0 < mins <= config.NEWS_LOOKAHEAD_MIN and pre_key not in notified:
-            text = await analyze(ev, "pre")
-            sent += await _broadcast(subs, text)
+            result = await analyze(ev, "pre")
+            sent += await _broadcast(subs, result["html"])
+            await storage.log_analysis({**result, "analysis": result["body"]})
             await asyncio.to_thread(storage.mark_notified, pre_key, title)
             notified.add(pre_key)
 
@@ -188,12 +249,32 @@ async def run_check() -> dict[str, Any]:
         post_key = f"{title}|{stamp}|post"
         actual = ev.get("actual")
         if -120 <= mins < 5 and actual not in (None, "") and post_key not in notified:
-            text = await analyze(ev, "post")
-            sent += await _broadcast(subs, text)
+            result = await analyze(ev, "post")
+            sent += await _broadcast(subs, result["html"])
+            await storage.log_analysis({**result, "analysis": result["body"]})
             await asyncio.to_thread(storage.mark_notified, post_key, title)
             notified.add(post_key)
 
-    return {"ok": True, "sent": sent, "subscribers": len(subs)}
+    # Daily gold pre-market outlook, once per local day after the configured hour.
+    gold_note = ""
+    if config.GOLD_SUMMARY_ENABLED:
+        local_now = config.now_local()
+        gold_key = f"gold|{local_now.date().isoformat()}"
+        if local_now.hour >= config.GOLD_SUMMARY_HOUR and gold_key not in notified:
+            try:
+                await daily_gold_summary(subs, events)
+                await asyncio.to_thread(storage.mark_notified, gold_key, "Daily gold outlook")
+                notified.add(gold_key)
+                sent += len(subs)
+                gold_note = "gold summary sent"
+            except Exception:  # noqa: BLE001 — never let the outlook break event alerts
+                log.exception("daily gold summary failed")
+                gold_note = "gold summary failed (see logs)"
+
+    out: dict[str, Any] = {"ok": True, "sent": sent, "subscribers": len(subs)}
+    if gold_note:
+        out["gold"] = gold_note
+    return out
 
 
 async def upcoming(limit: int = 15) -> list[dict[str, Any]]:

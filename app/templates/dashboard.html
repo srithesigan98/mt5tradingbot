@@ -212,6 +212,10 @@
         <div id="newsList"><div class="empty">Loading…</div></div>
       </div>
       <div class="card" style="margin-top:14px">
+        <h2>🧠 Latest news analysis (USD &amp; Gold)</h2>
+        <div id="analysisList"><div class="empty">Loading…</div></div>
+      </div>
+      <div class="card" style="margin-top:14px">
         <h2>Economic calendar (Myfxbook)</h2>
         <div style="border-radius:12px;overflow:hidden;border:1px solid var(--border)">
           <iframe id="calFrame" src="" style="width:100%;height:560px;border:0" loading="lazy"></iframe>
@@ -537,6 +541,35 @@
       } catch (e) { list.innerHTML = `<div class="empty">Couldn't load events.</div>`; }
     }
 
+    async function renderAnalyses() {
+      const box = document.getElementById("analysisList");
+      try {
+        const d = await (await fetch("/api/news/analyses")).json();
+        const rows = d.analyses || [];
+        if (!rows.length) {
+          box.innerHTML = `<div class="empty">No analyses yet — they appear here automatically when news alerts fire (and each morning for the gold outlook).</div>`;
+          return;
+        }
+        const phaseTag = (p) => p === "pre" ? "🔔 Heads-up" : p === "post" ? "📣 Released" : p === "gold" ? "🟡 Gold outlook" : p;
+        box.innerHTML = rows.map(r => {
+          const when = String(r.logged_at || "").replace("T", " ").slice(0, 16);
+          const nums = [
+            r.actual ? `Actual <b>${esc(r.actual)}</b>` : "",
+            r.forecast ? `Forecast ${esc(r.forecast)}` : "",
+            r.previous ? `Prev ${esc(r.previous)}` : "",
+          ].filter(Boolean).join(" · ");
+          return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+              <div style="font-weight:700">${r.impact ? impactBadge(r.impact) + " " : ""}${esc(r.event)}</div>
+              <div style="color:var(--muted);font-size:12px;white-space:nowrap">${phaseTag(r.phase)} · ${esc(when)}</div>
+            </div>
+            ${nums ? `<div style="color:var(--ink-2);font-size:12px;margin-top:3px">${nums}</div>` : ""}
+            <div class="analysis" style="margin-top:8px;white-space:pre-wrap">${esc(r.analysis)}</div>
+          </div>`;
+        }).join("");
+      } catch (e) { box.innerHTML = `<div class="empty">Couldn't load analyses.</div>`; }
+    }
+
     /* ---------- View switching ---------- */
     function setView(v) {
       state.view = v;
@@ -549,7 +582,7 @@
       if (state.view === "summary") { renderDayTiles(trades); if (state.data) renderRadar(state.data, trades); if (!state.month) return; renderCalendar(trades); renderEquity(trades); }
       else if (state.view === "charts") renderCustom(trades);
       else if (state.view === "cross") renderCross(trades);
-      else if (state.view === "calendar") { if (!_newsLoaded) { _newsLoaded = true; } renderNews(); }
+      else if (state.view === "calendar") { if (!_newsLoaded) { _newsLoaded = true; } renderNews(); renderAnalyses(); }
     }
     document.querySelectorAll(".viewtab").forEach(b => b.onclick = () => setView(b.dataset.view));
     document.getElementById("groupBy").onchange = (e) => { state.groupBy = e.target.value; if (state.data) renderCustom(state.data.trades); };

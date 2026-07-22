@@ -123,6 +123,16 @@ async def api_news() -> JSONResponse:
     return JSONResponse(payload)
 
 
+@app.get("/api/news/analyses")
+async def api_news_analyses() -> JSONResponse:
+    try:
+        rows = await storage.read_analyses(limit=20)
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to read news analyses")
+        rows = []
+    return JSONResponse({"analyses": rows})
+
+
 @app.api_route("/cron/news/{secret}", methods=["GET", "POST"])
 async def cron_news(secret: str) -> JSONResponse:
     """Hit this every ~5 min from a free cron pinger to fire due news alerts."""

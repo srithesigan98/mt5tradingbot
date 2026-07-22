@@ -47,6 +47,9 @@ HEADERS = [
 # Secondary worksheets for the news-alert feature.
 SUBSCRIBER_HEADERS = ["chat_id", "name", "subscribed_at"]
 NEWSLOG_HEADERS = ["key", "event", "notified_at"]
+NEWSANALYSIS_HEADERS = [
+    "logged_at", "phase", "impact", "event", "actual", "forecast", "previous", "analysis"
+]
 
 _spreadsheet = None  # cached gspread Spreadsheet
 _ws_cache: dict[str, gspread.Worksheet] = {}
@@ -194,3 +197,35 @@ def mark_notified(key: str, event: str) -> None:
     ws = _get_ws("NewsLog", NEWSLOG_HEADERS)
     ws.append_row([key, event, config.now_local().isoformat(timespec="seconds")],
                   value_input_option="USER_ENTERED")
+
+
+# --- News analysis archive (shown on the dashboard) ----------------------
+
+def _log_analysis_sync(entry: dict[str, Any]) -> None:
+    ws = _get_ws("NewsAnalysis", NEWSANALYSIS_HEADERS)
+    ws.append_row(
+        [
+            config.now_local().isoformat(timespec="seconds"),
+            entry.get("phase", ""),
+            entry.get("impact", ""),
+            entry.get("event", ""),
+            entry.get("actual", ""),
+            entry.get("forecast", ""),
+            entry.get("previous", ""),
+            entry.get("analysis", ""),
+        ],
+        value_input_option="USER_ENTERED",
+    )
+
+
+def _read_analyses_sync(limit: int) -> list[dict[str, Any]]:
+    ws = _get_ws("NewsAnalysis", NEWSANALYSIS_HEADERS)
+    return list(reversed(ws.get_all_records()))[:limit]
+
+
+async def log_analysis(entry: dict[str, Any]) -> None:
+    await asyncio.to_thread(_log_analysis_sync, entry)
+
+
+async def read_analyses(limit: int = 20) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_read_analyses_sync, limit)

@@ -39,6 +39,14 @@ You send a screenshot ──▶ Telegram bot (webhook)
   an **Economic Calendar** tab (this-week high-impact list + Myfxbook embed).
   Alerts are driven by a secured `/cron/news/<secret>` endpoint pinged every
   ~5 min by a free scheduler (see docs/SETUP.md Part 6).
+- **Daily gold pre-market outlook** — every morning (default 8am local) the bot
+  broadcasts a gold (XAU/USD) outlook built around that day's scheduled US
+  events, ending in a Gold bias. Tune with `GOLD_SUMMARY_HOUR` /
+  `GOLD_SUMMARY_ENABLED`.
+- **News analysis archive on the dashboard** — every alert and gold outlook is
+  saved to a `NewsAnalysis` sheet tab and shown in the Economic Calendar view
+  ("Latest news analysis"), newest first, so the USD/Gold write-ups live on the
+  site, not just in Telegram.
 - **Multiple traders** — share the bot with someone else and each person's
   trades are tagged with their Telegram username. The dashboard has
   **per-trader tabs** (All / you / them) that recompute every stat, and

@@ -66,6 +66,13 @@ ECON_CALENDAR_EMBED_URL = (
     or "https://www.myfxbook.com/economic-calendar"
 )
 
+# Daily gold pre-market summary broadcast once each morning (local hour).
+GOLD_SUMMARY_ENABLED = (_clean(os.getenv("GOLD_SUMMARY_ENABLED")) or "true").lower() not in ("0", "false", "no")
+try:
+    GOLD_SUMMARY_HOUR = int(_clean(os.getenv("GOLD_SUMMARY_HOUR")) or "8")
+except ValueError:
+    GOLD_SUMMARY_HOUR = 8
+
 
 def _parse_ids(raw: str) -> set[int]:
     ids: set[int] = set()
