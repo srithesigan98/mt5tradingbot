@@ -118,8 +118,9 @@ async def api_image(file_id: str) -> Response:
 @app.get("/api/news")
 async def api_news() -> JSONResponse:
     from . import news
-    events = await news.upcoming(limit=15)
-    return JSONResponse({"events": events, "embed_url": config.ECON_CALENDAR_EMBED_URL})
+    payload = await news.calendar_payload(limit=15)
+    payload["embed_url"] = config.ECON_CALENDAR_EMBED_URL
+    return JSONResponse(payload)
 
 
 @app.api_route("/cron/news/{secret}", methods=["GET", "POST"])

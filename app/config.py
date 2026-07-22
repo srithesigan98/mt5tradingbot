@@ -52,6 +52,10 @@ PUBLIC_URL = _clean(os.getenv("RENDER_EXTERNAL_URL") or os.getenv("PUBLIC_URL"))
 NEWS_FEED_URL = _clean(os.getenv("NEWS_FEED_URL")) or "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 # Countries to alert on (Forex Factory uses currency codes; USA = "USD").
 NEWS_COUNTRIES = {c for c in (_clean(os.getenv("NEWS_COUNTRIES")) or "USD").replace(" ", "").split(",") if c}
+# Impact levels to include. Forex Factory rates fewer events "high" than
+# Myfxbook does, so we include "medium" by default to match the fuller calendar.
+# Set NEWS_IMPACT=high to restrict alerts to tier-1 events (NFP, CPI, FOMC).
+NEWS_IMPACT = {s.strip().lower() for s in (_clean(os.getenv("NEWS_IMPACT")) or "high,medium").split(",") if s.strip()}
 try:
     NEWS_LOOKAHEAD_MIN = int(_clean(os.getenv("NEWS_LOOKAHEAD_MIN")) or "15")
 except ValueError:

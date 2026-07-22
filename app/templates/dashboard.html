@@ -208,7 +208,7 @@
     <!-- Economic Calendar -->
     <div id="view-calendar" style="display:none">
       <div class="card">
-        <h2>🇺🇸 This week — high-impact US events</h2>
+        <h2>🇺🇸 Upcoming US events (high &amp; medium impact)</h2>
         <div id="newsList"><div class="empty">Loading…</div></div>
       </div>
       <div class="card" style="margin-top:14px">
@@ -510,16 +510,25 @@
 
     /* ---------- Economic calendar ---------- */
     let _newsLoaded = false;
+    function impactBadge(imp) {
+      const m = { high: ["#fdeaec", "#c0392b", "HIGH"], medium: ["#fdf6df", "#9a7b06", "MED"], low: ["#e5f7ef", "#0a7c5c", "LOW"] };
+      const [bg, ink, label] = m[(imp || "").toLowerCase()] || ["#f3f0fb", "#5b5680", (imp || "").toUpperCase()];
+      return `<span style="background:${bg};color:${ink};font-size:10px;font-weight:800;padding:2px 7px;border-radius:6px">${label}</span>`;
+    }
     async function renderNews() {
       const list = document.getElementById("newsList");
       try {
         const d = await (await fetch("/api/news")).json();
         const frame = document.getElementById("calFrame"), link = document.getElementById("calLink");
         if (d.embed_url && frame.src !== d.embed_url) { frame.src = d.embed_url; link.href = d.embed_url; }
-        if (!d.events || !d.events.length) { list.innerHTML = `<div class="empty">No high-impact US events found for this week.</div>`; return; }
+        if (d.error) { list.innerHTML = `<div class="empty">Couldn't reach the news feed.<br><small>${esc(d.error)}</small></div>`; return; }
+        if (!d.events || !d.events.length) {
+          list.innerHTML = `<div class="empty">No matching US events in the current feed window (${d.total_fetched || 0} events checked).<br><small>The embedded Myfxbook calendar below shows the full schedule.</small></div>`;
+          return;
+        }
         list.innerHTML = d.events.map(e => `
           <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
-            <div><div style="font-weight:700">${esc(e.title)}</div>
+            <div><div style="font-weight:700">${impactBadge(e.impact)} ${esc(e.title)}</div>
               <div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(e.time_local)}</div></div>
             <div style="text-align:right;font-size:12px;color:var(--ink-2);white-space:nowrap">
               ${e.forecast ? `Forecast <b>${esc(e.forecast)}</b><br>` : ""}${e.previous ? `Prev ${esc(e.previous)}` : ""}

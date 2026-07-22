@@ -86,8 +86,8 @@ def _country(ev: dict[str, Any]) -> str:
     return str(ev.get("country") or ev.get("currency") or "").strip().upper()
 
 
-def is_high_target(ev: dict[str, Any]) -> bool:
-    return _country(ev) in config.NEWS_COUNTRIES and _impact(ev) == "high"
+def is_target(ev: dict[str, Any]) -> bool:
+    return _country(ev) in config.NEWS_COUNTRIES and _impact(ev) in config.NEWS_IMPACT
 
 
 def _local_str(dt: datetime | None) -> str:
@@ -102,16 +102,17 @@ async def analyze(ev: dict[str, Any], phase: str) -> str:
     previous = ev.get("previous") or "n/a"
     actual = ev.get("actual") or "n/a"
     dt = _parse_time(ev)
+    impact = (_impact(ev) or "high").capitalize()
     if phase == "pre":
         user = (
-            f"Upcoming HIGH-impact US event in ~{config.NEWS_LOOKAHEAD_MIN} minutes.\n"
+            f"Upcoming {impact}-impact US event in ~{config.NEWS_LOOKAHEAD_MIN} minutes.\n"
             f"Event: {title}\nForecast: {forecast}\nPrevious: {previous}\n"
             f"Time (local): {_local_str(dt)}\n\n"
             "Give the pre-release read: what to expect, and the likely USD and Gold "
             "reaction if it beats vs misses."
         )
         emoji = "🔔"
-        tag = f"High-impact US news in ~{config.NEWS_LOOKAHEAD_MIN} min"
+        tag = f"{impact}-impact US news in ~{config.NEWS_LOOKAHEAD_MIN} min"
     else:
         user = (
             f"HIGH-impact US event just released.\n"
@@ -166,7 +167,7 @@ async def run_check() -> dict[str, Any]:
     sent = 0
 
     for ev in events:
-        if not is_high_target(ev):
+        if not is_target(ev):
             continue
         dt = _parse_time(ev)
         if not dt:
@@ -195,16 +196,25 @@ async def run_check() -> dict[str, Any]:
     return {"ok": True, "sent": sent, "subscribers": len(subs)}
 
 
-async def upcoming(limit: int = 12) -> list[dict[str, Any]]:
-    """Upcoming high-impact target-country events, for /news and the dashboard."""
+async def upcoming(limit: int = 15) -> list[dict[str, Any]]:
+    """Upcoming target-country events, for /news and the dashboard."""
+    return (await calendar_payload(limit))["events"]
+
+
+async def calendar_payload(limit: int = 15) -> dict[str, Any]:
+    """Upcoming events plus diagnostics (so the dashboard/user can see why a
+    list is empty: a feed error vs. genuinely no matching events)."""
     try:
         events = await fetch_events()
-    except Exception:  # noqa: BLE001
-        return []
+    except Exception as exc:  # noqa: BLE001
+        log.exception("news feed fetch failed")
+        return {"events": [], "total_fetched": 0, "matched": 0,
+                "error": f"{type(exc).__name__}: {exc}"}
+
     now = datetime.now(timezone.utc)
     out = []
     for ev in events:
-        if not is_high_target(ev):
+        if not is_target(ev):
             continue
         dt = _parse_time(ev)
         if not dt or dt < now:
@@ -212,10 +222,12 @@ async def upcoming(limit: int = 12) -> list[dict[str, Any]]:
         out.append({
             "title": str(ev.get("title") or ""),
             "country": _country(ev),
+            "impact": _impact(ev),
             "time_utc": dt.isoformat(),
             "time_local": _local_str(dt),
             "forecast": ev.get("forecast") or "",
             "previous": ev.get("previous") or "",
         })
     out.sort(key=lambda e: e["time_utc"])
-    return out[:limit]
+    return {"events": out[:limit], "total_fetched": len(events),
+            "matched": len(out), "error": None}
