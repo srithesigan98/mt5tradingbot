@@ -8,6 +8,7 @@ and an interpretation after the actual number prints.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -43,23 +44,87 @@ _SYSTEM = (
     "that was not provided."
 )
 
-# --- Feed fetching (cached) ----------------------------------------------
+# --- Feed fetching (multi-layer cache) ------------------------------------
+# The public calendar feeds rate-limit by IP, and Render's free tier shares
+# its outbound IP with many other apps hitting the same feed — so 429s are
+# normal. Strategy: short in-memory cache -> network (primary + fallback host,
+# with a cooldown after a 429) -> persistent copy in the Google Sheet. The
+# weekly schedule barely changes, so serving a stale copy is fine.
 
-_cache: dict[str, Any] = {"at": 0.0, "events": []}
-_CACHE_TTL = 300  # seconds
+_cache: dict[str, Any] = {"at": 0.0, "events": [], "fetched_at": "", "source": ""}
+_CACHE_TTL = 300          # seconds an in-memory copy is considered fresh
+_ATTEMPT_GAP = 60         # min seconds between network attempts
+_COOLDOWN_429 = 900       # back off this long after a 429
+_net = {"cooldown_until": 0.0, "last_attempt": 0.0, "last_error": ""}
+
+
+def _feed_urls() -> list[str]:
+    urls = [config.NEWS_FEED_URL]
+    # Same data on an alternate host — sometimes rate-limited separately.
+    alt = config.NEWS_FEED_URL.replace("https://nfs.", "https://cdn-nfs.")
+    if alt != config.NEWS_FEED_URL:
+        urls.append(alt)
+    return urls
+
+
+async def _fetch_url(url: str) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+        r = await c.get(url, headers={"User-Agent": "Mozilla/5.0 (trading-journal)"})
+        r.raise_for_status()
+        data = r.json()
+    return data if isinstance(data, list) else data.get("events", [])
+
+
+async def _load_sheet_cache() -> bool:
+    """Populate the memory cache from the Google Sheet copy. True on success."""
+    try:
+        fetched_at, js = await asyncio.to_thread(storage.load_news_cache)
+        if js:
+            events = json.loads(js)
+            if events:
+                _cache.update(events=events, at=time.time(), fetched_at=fetched_at, source="sheet")
+                return True
+    except Exception:  # noqa: BLE001
+        log.exception("loading news cache from sheet failed")
+    return False
 
 
 async def fetch_events(force: bool = False) -> list[dict[str, Any]]:
-    if not force and _cache["events"] and (time.time() - _cache["at"] < _CACHE_TTL):
+    now = time.time()
+    if not force and _cache["events"] and (now - _cache["at"] < _CACHE_TTL):
         return _cache["events"]
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
-        r = await c.get(config.NEWS_FEED_URL, headers={"User-Agent": "Mozilla/5.0 (trading-journal)"})
-        r.raise_for_status()
-        data = r.json()
-    events = data if isinstance(data, list) else data.get("events", [])
-    _cache["events"] = events
-    _cache["at"] = time.time()
-    return events
+
+    # Try the network unless we're throttled or cooling down after a 429.
+    if now >= _net["cooldown_until"] and now - _net["last_attempt"] >= _ATTEMPT_GAP:
+        _net["last_attempt"] = now
+        for url in _feed_urls():
+            try:
+                events = await _fetch_url(url)
+                _cache.update(
+                    events=events, at=now, source="network",
+                    fetched_at=config.now_local().isoformat(timespec="seconds"),
+                )
+                _net["last_error"] = ""
+                try:  # persist for restarts / rate-limit windows
+                    await asyncio.to_thread(storage.save_news_cache, json.dumps(events))
+                except Exception:  # noqa: BLE001
+                    log.exception("saving news cache to sheet failed")
+                return events
+            except httpx.HTTPStatusError as exc:
+                _net["last_error"] = f"{exc.response.status_code} from feed"
+                if exc.response.status_code == 429:
+                    _net["cooldown_until"] = now + _COOLDOWN_429
+                log.warning("news feed %s -> %s", url, exc.response.status_code)
+            except Exception as exc:  # noqa: BLE001
+                _net["last_error"] = f"{type(exc).__name__}: {exc}"
+                log.warning("news feed %s failed: %s", url, exc)
+
+    # Fall back to whatever we have: memory first, then the sheet copy.
+    if _cache["events"]:
+        return _cache["events"]
+    if await _load_sheet_cache():
+        return _cache["events"]
+    raise RuntimeError(_net["last_error"] or "news feed unavailable and no cached copy yet")
 
 
 def _parse_time(ev: dict[str, Any]) -> datetime | None:
@@ -311,4 +376,6 @@ async def calendar_payload(limit: int = 15) -> dict[str, Any]:
         })
     out.sort(key=lambda e: e["time_utc"])
     return {"events": out[:limit], "total_fetched": len(events),
-            "matched": len(out), "error": None}
+            "matched": len(out), "error": None,
+            "source": _cache.get("source", ""),
+            "fetched_at": _cache.get("fetched_at", "")}

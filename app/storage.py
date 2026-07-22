@@ -65,8 +65,9 @@ def _get_spreadsheet():
     return _spreadsheet
 
 
-def _get_ws(name: str, headers: list[str]) -> gspread.Worksheet:
-    """Open (and cache) a worksheet by name, ensuring its header row exists."""
+def _get_ws(name: str, headers: list[str] | None) -> gspread.Worksheet:
+    """Open (and cache) a worksheet by name, ensuring its header row exists.
+    Pass headers=None for a raw sheet with no enforced header row."""
     with _lock:
         if name in _ws_cache:
             return _ws_cache[name]
@@ -74,10 +75,11 @@ def _get_ws(name: str, headers: list[str]) -> gspread.Worksheet:
         try:
             ws = ss.worksheet(name)
         except gspread.WorksheetNotFound:
-            ws = ss.add_worksheet(title=name, rows=1000, cols=max(len(headers), 4))
-        existing = ws.row_values(1)
-        if existing != headers:
-            ws.update([headers], "A1")
+            ws = ss.add_worksheet(title=name, rows=1000, cols=max(len(headers or []), 4))
+        if headers is not None:
+            existing = ws.row_values(1)
+            if existing != headers:
+                ws.update([headers], "A1")
         _ws_cache[name] = ws
         return ws
 
@@ -229,3 +231,27 @@ async def log_analysis(entry: dict[str, Any]) -> None:
 
 async def read_analyses(limit: int = 20) -> list[dict[str, Any]]:
     return await asyncio.to_thread(_read_analyses_sync, limit)
+
+
+# --- News feed cache (survives restarts & feed rate limits) ---------------
+# Layout of the raw "NewsCache" sheet: A1 = fetched_at ISO timestamp,
+# A2..An = the feed JSON split into <50k-char chunks (Sheets cell limit).
+
+_CHUNK = 40000
+
+
+def save_news_cache(events_json: str) -> None:
+    ws = _get_ws("NewsCache", None)
+    chunks = [events_json[i : i + _CHUNK] for i in range(0, len(events_json), _CHUNK)]
+    rows = [[config.now_local().isoformat(timespec="seconds")]] + [[c] for c in chunks]
+    ws.clear()
+    ws.update(rows, "A1")
+
+
+def load_news_cache() -> tuple[str, str]:
+    """Returns (fetched_at_iso, feed_json) — empty strings if nothing cached."""
+    ws = _get_ws("NewsCache", None)
+    col = ws.col_values(1)
+    if len(col) < 2:
+        return "", ""
+    return col[0], "".join(col[1:])

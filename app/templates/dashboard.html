@@ -525,12 +525,14 @@
         const d = await (await fetch("/api/news")).json();
         const frame = document.getElementById("calFrame"), link = document.getElementById("calLink");
         if (d.embed_url && frame.src !== d.embed_url) { frame.src = d.embed_url; link.href = d.embed_url; }
-        if (d.error) { list.innerHTML = `<div class="empty">Couldn't reach the news feed.<br><small>${esc(d.error)}</small></div>`; return; }
+        if (d.error) { list.innerHTML = `<div class="empty">The live feed is busy right now — it retries automatically and keeps a cached copy once it succeeds.<br><small>${esc(d.error)}</small></div>`; return; }
         if (!d.events || !d.events.length) {
           list.innerHTML = `<div class="empty">No matching US events in the current feed window (${d.total_fetched || 0} events checked).<br><small>The embedded Myfxbook calendar below shows the full schedule.</small></div>`;
           return;
         }
-        list.innerHTML = d.events.map(e => `
+        const staleNote = d.source === "sheet" && d.fetched_at
+          ? `<div style="color:var(--muted);font-size:12px;margin-bottom:6px">Live feed busy — showing cached schedule from ${esc(String(d.fetched_at).replace("T", " ").slice(0, 16))}</div>` : "";
+        list.innerHTML = staleNote + d.events.map(e => `
           <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
             <div><div style="font-weight:700">${impactBadge(e.impact)} ${esc(e.title)}</div>
               <div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(e.time_local)}</div></div>
