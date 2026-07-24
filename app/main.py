@@ -6,13 +6,15 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi import FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import bot, config, storage
-from .stats import compute, filter_by_trader, trader_names
+from . import auth, bot, config, storage, users
+from .stats import compute
+
+COOKIE = "tj_session"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -27,6 +29,11 @@ async def lifespan(app: FastAPI):
     missing = config.missing_required()
     if missing:
         log.warning("Missing required env vars: %s. The bot will not fully work.", ", ".join(missing))
+    if not config.OWNER_USERNAME or not config.OWNER_PASSWORD:
+        log.warning(
+            "OWNER_USERNAME / OWNER_PASSWORD not set — nobody can log into the "
+            "dashboard. Set them (plus OWNER_TELEGRAM_USERNAME) in your environment."
+        )
 
     # Register the webhook with Telegram so it pushes updates to us.
     if config.TELEGRAM_BOT_TOKEN and config.PUBLIC_URL:
@@ -68,22 +75,42 @@ async def telegram_webhook(
     return JSONResponse({"ok": True})
 
 
+def _current_user(request: Request) -> dict | None:
+    return auth.read_session(request.cookies.get(COOKIE))
+
+
+def _require_user(request: Request) -> dict:
+    u = _current_user(request)
+    if not u:
+        raise HTTPException(status_code=401, detail="login required")
+    return u
+
+
 @app.get("/api/trades")
-async def api_trades(trader: str = Query(default="")) -> JSONResponse:
+async def api_trades(request: Request, user: str = Query(default="")) -> JSONResponse:
+    me = _require_user(request)
+
+    # Which user's sheet to show. Admins may view any user via ?user=<username>.
+    target = me
+    viewers: list[str] = [me["username"]]
+    if me.get("role") == "admin":
+        everyone = await users.all_users()
+        viewers = [u["username"] for u in everyone]
+        if user:
+            match = next((u for u in everyone if u["username"].lower() == user.lower()), None)
+            if match:
+                target = match
+
     try:
-        rows = await storage.read_trades()
+        rows = await storage.read_trades(target["sheet_id"])
     except Exception:  # noqa: BLE001
         log.exception("Failed to read trades")
         raise HTTPException(status_code=500, detail="could not read journal")
 
-    traders = trader_names(rows)
-    selected = trader.strip()
-    if selected:
-        rows = filter_by_trader(rows, selected)
-
     payload = compute(rows)
-    payload["traders"] = traders
-    payload["selected_trader"] = selected
+    payload["me"] = {"username": me["username"], "role": me.get("role", "user")}
+    payload["viewers"] = viewers
+    payload["selected_user"] = target["username"]
     return JSONResponse(payload)
 
 
@@ -93,8 +120,9 @@ _IMAGE_CACHE_MAX = 60
 
 
 @app.get("/api/image/{file_id}")
-async def api_image(file_id: str) -> Response:
+async def api_image(request: Request, file_id: str) -> Response:
     """Serve a trade screenshot by proxying it from Telegram's file storage."""
+    _require_user(request)
     if file_id in _image_cache:
         return Response(content=_image_cache[file_id], media_type="image/jpeg")
     try:
@@ -147,6 +175,39 @@ async def cron_news(secret: str) -> JSONResponse:
     return JSONResponse(result)
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: str = Query(default="")) -> HTMLResponse:
+    if _current_user(request):
+        return RedirectResponse("/", status_code=303)
+    return _TEMPLATES.TemplateResponse(request, "login.html", {"error": error})
+
+
+@app.post("/login")
+async def login_submit(username: str = Form(...), password: str = Form(...)) -> Response:
+    user = await users.authenticate(username, password)
+    if not user:
+        return RedirectResponse("/login?error=1", status_code=303)
+    token = auth.make_session({
+        "username": user["username"], "role": user.get("role", "user"),
+        "sheet_id": user["sheet_id"], "telegram": user.get("telegram", ""),
+    })
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(
+        COOKIE, token, max_age=config.SESSION_DAYS * 86400,
+        httponly=True, samesite="lax", secure=bool(config.PUBLIC_URL.startswith("https")),
+    )
+    return resp
+
+
+@app.get("/logout")
+async def logout() -> Response:
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(COOKIE)
+    return resp
+
+
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request) -> HTMLResponse:
+async def dashboard(request: Request) -> Response:
+    if not _current_user(request):
+        return RedirectResponse("/login", status_code=303)
     return _TEMPLATES.TemplateResponse(request, "dashboard.html", {})

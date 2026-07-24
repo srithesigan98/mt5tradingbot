@@ -44,34 +44,50 @@ HEADERS = [
     "discipline",
 ]
 
-# Secondary worksheets for the news-alert feature.
+# Secondary worksheets for the news-alert feature (live in the CONTROL sheet).
 SUBSCRIBER_HEADERS = ["chat_id", "name", "subscribed_at"]
 NEWSLOG_HEADERS = ["key", "event", "notified_at"]
 NEWSANALYSIS_HEADERS = [
     "logged_at", "phase", "impact", "event", "actual", "forecast", "previous", "analysis"
 ]
+# Users registry (CONTROL sheet). password_hash is a PBKDF2 hash from auth.py.
+USERS_HEADERS = ["username", "password_hash", "telegram", "sheet_id", "role", "created_at"]
 
-_spreadsheet = None  # cached gspread Spreadsheet
-_ws_cache: dict[str, gspread.Worksheet] = {}
+# The control sheet holds the Users registry + shared news tabs; each user's
+# trades live in their own sheet (or the control sheet for the owner).
+CONTROL = config.GOOGLE_SHEET_ID
+
+_client = None  # cached authorized gspread client
+_spreadsheets: dict[str, Any] = {}   # spreadsheet_id -> Spreadsheet
+_ws_cache: dict[tuple[str, str], gspread.Worksheet] = {}  # (sheet_id, name) -> ws
 _lock = threading.Lock()
 
 
-def _get_spreadsheet():
-    global _spreadsheet
-    if _spreadsheet is None:
+def _get_client_obj():
+    global _client
+    if _client is None:
         info = json.loads(config.GOOGLE_CREDENTIALS_JSON)
         creds = Credentials.from_service_account_info(info, scopes=_SCOPES)
-        _spreadsheet = gspread.authorize(creds).open_by_key(config.GOOGLE_SHEET_ID)
-    return _spreadsheet
+        _client = gspread.authorize(creds)
+    return _client
 
 
-def _get_ws(name: str, headers: list[str] | None) -> gspread.Worksheet:
-    """Open (and cache) a worksheet by name, ensuring its header row exists.
-    Pass headers=None for a raw sheet with no enforced header row."""
+def _open(sheet_id: str):
+    sid = sheet_id or CONTROL
+    if sid not in _spreadsheets:
+        _spreadsheets[sid] = _get_client_obj().open_by_key(sid)
+    return _spreadsheets[sid]
+
+
+def _get_ws(name: str, headers: list[str] | None, sheet_id: str | None = None) -> gspread.Worksheet:
+    """Open (and cache) a worksheet by name in the given sheet (default CONTROL),
+    ensuring its header row exists. Pass headers=None for a raw sheet."""
+    sid = sheet_id or CONTROL
+    key = (sid, name)
     with _lock:
-        if name in _ws_cache:
-            return _ws_cache[name]
-        ss = _get_spreadsheet()
+        if key in _ws_cache:
+            return _ws_cache[key]
+        ss = _open(sid)
         try:
             ws = ss.worksheet(name)
         except gspread.WorksheetNotFound:
@@ -80,16 +96,16 @@ def _get_ws(name: str, headers: list[str] | None) -> gspread.Worksheet:
             existing = ws.row_values(1)
             if existing != headers:
                 ws.update([headers], "A1")
-        _ws_cache[name] = ws
+        _ws_cache[key] = ws
         return ws
 
 
-def _get_worksheet() -> gspread.Worksheet:
-    return _get_ws(config.WORKSHEET_NAME, HEADERS)
+def _trades_ws(sheet_id: str) -> gspread.Worksheet:
+    return _get_ws(config.WORKSHEET_NAME, HEADERS, sheet_id=sheet_id)
 
 
-def _append_sync(trade: dict[str, Any], source: str, trader: str, file_id: str) -> None:
-    ws = _get_worksheet()
+def _append_sync(sheet_id: str, trade: dict[str, Any], source: str, trader: str, file_id: str) -> None:
+    ws = _trades_ws(sheet_id)
     row = [
         config.now_local().isoformat(timespec="seconds"),
         trade.get("trade_date") or "",
@@ -118,13 +134,13 @@ def _append_sync(trade: dict[str, Any], source: str, trader: str, file_id: str) 
     ws.append_row(row, value_input_option="USER_ENTERED")
 
 
-def _read_sync() -> list[dict[str, Any]]:
-    ws = _get_worksheet()
+def _read_sync(sheet_id: str) -> list[dict[str, Any]]:
+    ws = _trades_ws(sheet_id)
     return ws.get_all_records()  # list of dicts keyed by header
 
 
-def _delete_last_sync() -> bool:
-    ws = _get_worksheet()
+def _delete_last_sync(sheet_id: str) -> bool:
+    ws = _trades_ws(sheet_id)
     values = ws.get_all_values()
     if len(values) <= 1:  # only the header row
         return False
@@ -132,16 +148,16 @@ def _delete_last_sync() -> bool:
     return True
 
 
-async def append_trade(trade: dict[str, Any], source: str, trader: str = "", file_id: str = "") -> None:
-    await asyncio.to_thread(_append_sync, trade, source, trader, file_id)
+async def append_trade(sheet_id: str, trade: dict[str, Any], source: str, trader: str = "", file_id: str = "") -> None:
+    await asyncio.to_thread(_append_sync, sheet_id, trade, source, trader, file_id)
 
 
-async def read_trades() -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_read_sync)
+async def read_trades(sheet_id: str) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_read_sync, sheet_id)
 
 
-async def delete_last_trade() -> bool:
-    return await asyncio.to_thread(_delete_last_sync)
+async def delete_last_trade(sheet_id: str) -> bool:
+    return await asyncio.to_thread(_delete_last_sync, sheet_id)
 
 
 # --- Subscribers (for news broadcasts) -----------------------------------
@@ -255,3 +271,45 @@ def load_news_cache() -> tuple[str, str]:
     if len(col) < 2:
         return "", ""
     return col[0], "".join(col[1:])
+
+
+# --- Users registry (CONTROL sheet "Users" tab) --------------------------
+
+def _list_users_sync() -> list[dict[str, Any]]:
+    ws = _get_ws("Users", USERS_HEADERS)
+    return ws.get_all_records()
+
+
+def _find_user(field: str, value: str) -> dict[str, Any] | None:
+    value = (value or "").strip().lower()
+    if not value:
+        return None
+    for r in _list_users_sync():
+        if str(r.get(field, "")).strip().lower() == value:
+            return r
+    return None
+
+
+def _add_user_sync(username: str, password_hash: str, telegram: str, sheet_id: str, role: str) -> None:
+    ws = _get_ws("Users", USERS_HEADERS)
+    ws.append_row(
+        [username, password_hash, telegram.lstrip("@"), sheet_id, role,
+         config.now_local().isoformat(timespec="seconds")],
+        value_input_option="USER_ENTERED",
+    )
+
+
+async def list_users() -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_list_users_sync)
+
+
+async def get_user_by_login(username: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_find_user, "username", username)
+
+
+async def get_user_by_telegram(telegram: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_find_user, "telegram", telegram)
+
+
+async def add_user(username: str, password_hash: str, telegram: str, sheet_id: str, role: str = "user") -> None:
+    await asyncio.to_thread(_add_user_sync, username, password_hash, telegram, sheet_id, role)

@@ -24,6 +24,12 @@ services:
         sync: false
       - key: GOOGLE_CREDENTIALS_JSON
         sync: false
+      - key: OWNER_USERNAME
+        sync: false
+      - key: OWNER_PASSWORD
+        sync: false
+      - key: OWNER_TELEGRAM_USERNAME
+        sync: false
       - key: ALLOWED_TELEGRAM_USER_IDS
         sync: false
       - key: PYTHON_VERSION

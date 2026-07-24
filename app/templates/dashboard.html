@@ -140,7 +140,11 @@
         <div class="logo">📈</div>
         <div><h1>Trading Journal</h1><div class="sub">Auto-updated from Telegram</div></div>
       </div>
-      <div class="refresh" id="updated"></div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="refresh" id="updated"></div>
+        <div id="userbox" style="font-size:13px;color:var(--ink-2)"></div>
+        <a href="/logout" style="font-size:13px;color:var(--purple);font-weight:600;text-decoration:none">Log out</a>
+      </div>
     </div>
 
     <div class="tabs" id="tabs"></div>
@@ -254,15 +258,22 @@
     const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neu");
     const parseDate = (s) => { const p = (s||"").split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0], p[1]-1, p[2]) : null; };
 
-    let state = { trader: "", view: "summary", month: null, data: null, charts: {},
+    let state = { user: "", view: "summary", month: null, data: null, charts: {},
                   groupBy: "instrument", metric: "pnl" };
 
-    /* ---------- Trader tabs ---------- */
-    function renderTabs(traders) {
+    /* ---------- User switcher (admin sees one tab per user) ---------- */
+    function renderUsers(s) {
+      const me = s.me || { username: "", role: "user" };
+      document.getElementById("userbox").textContent =
+        me.username + (me.role === "admin" ? " (admin)" : "");
       const el = document.getElementById("tabs");
-      const mk = (name, label) => `<button class="tab ${state.trader === name ? "active" : ""}" data-trader="${esc(name)}">${esc(label)}</button>`;
-      el.innerHTML = mk("", "All traders") + traders.map(t => mk(t, t)).join("");
-      el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.trader = b.dataset.trader; load(); });
+      const viewers = s.viewers || [];
+      // Only admins (more than one viewable user) get a switcher.
+      if (me.role !== "admin" || viewers.length <= 1) { el.innerHTML = ""; return; }
+      const sel = s.selected_user || me.username;
+      el.innerHTML = viewers.map(u =>
+        `<button class="tab ${u === sel ? "active" : ""}" data-user="${esc(u)}">${esc(u)}</button>`).join("");
+      el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.user = b.dataset.user; load(); });
     }
 
     /* ---------- KPI cards ---------- */
@@ -595,10 +606,13 @@
     /* ---------- Load ---------- */
     async function load() {
       try {
-        const url = "/api/trades" + (state.trader ? "?trader=" + encodeURIComponent(state.trader) : "");
-        const s = await (await fetch(url)).json(); state.data = s;
+        const url = "/api/trades" + (state.user ? "?user=" + encodeURIComponent(state.user) : "");
+        const res = await fetch(url);
+        if (res.status === 401) { window.location.href = "/login"; return; }
+        const s = await res.json(); state.data = s;
+        state.user = s.selected_user || "";
         if (!state.month) { const last = s.trades.length ? s.trades[s.trades.length - 1].date : ""; const d = parseDate(last); state.month = d ? new Date(d.getFullYear(), d.getMonth(), 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1); }
-        renderTabs(s.traders || []);
+        renderUsers(s);
         renderKpis(s);
         renderView(s.trades);
         renderTable(s.trades);

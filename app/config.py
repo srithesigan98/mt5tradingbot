@@ -74,6 +74,24 @@ except ValueError:
     GOLD_SUMMARY_HOUR = 8
 
 
+# --- Multi-user auth -----------------------------------------------------
+# The GOOGLE_SHEET_ID above is the CONTROL sheet: it holds the Users registry
+# and the shared news tabs. Each user's trades live in their own sheet.
+# Secret used to sign dashboard login cookies (falls back to WEBHOOK_SECRET).
+SESSION_SECRET = _clean(os.getenv("SESSION_SECRET")) or (WEBHOOK_SECRET + "-session")
+# Bootstrap admin login (always valid, so you can log in before adding users).
+OWNER_USERNAME = _clean(os.getenv("OWNER_USERNAME"))
+OWNER_PASSWORD = _clean(os.getenv("OWNER_PASSWORD"))
+# The admin's Telegram username (no @) — their trades go to the control sheet
+# and they may run /adduser.
+OWNER_TELEGRAM_USERNAME = _clean(os.getenv("OWNER_TELEGRAM_USERNAME")).lstrip("@").lower()
+# How long a dashboard login stays valid.
+try:
+    SESSION_DAYS = int(_clean(os.getenv("SESSION_DAYS")) or "30")
+except ValueError:
+    SESSION_DAYS = 30
+
+
 def _parse_ids(raw: str) -> set[int]:
     ids: set[int] = set()
     for part in raw.replace(" ", "").split(","):

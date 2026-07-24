@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Any
 
-from . import analyzer, config, storage, telegram
+from . import analyzer, auth, config, storage, telegram, users
 from .stats import summarize
 
 log = logging.getLogger("bot")
@@ -79,47 +79,87 @@ def _confirmation(trade: dict[str, Any], trader: str) -> str:
     return "\n".join(lines)
 
 
-async def _handle_command(chat_id: int, text: str, trader: str = "") -> bool:
+async def _handle_command(chat_id: int, text: str, trader: str, tg_username: str, user: dict | None) -> bool:
     cmd = text.split()[0].lower().lstrip("/").split("@")[0]
 
     if cmd in ("start", "help"):
-        # Auto-subscribe to news on /start.
+        if user is None:
+            handle = f"@{tg_username}" if tg_username else "(no Telegram username set)"
+            await telegram.send_message(
+                chat_id,
+                "👋 <b>Trading Journal Bot</b>\n\n"
+                f"Your Telegram username {handle} isn't registered yet, so I can't log "
+                "trades for you. Ask the owner to add you with:\n"
+                f"<code>/adduser yourlogin yourpassword {tg_username or 'your_tg_username'} SHEET_ID</code>\n\n"
+                "(You also need a Telegram @username set in Settings.)",
+            )
+            return True
         try:
-            await storage.add_subscriber(chat_id, trader)
+            await storage.add_subscriber(chat_id, user["username"])
         except Exception:  # noqa: BLE001
             log.exception("subscribe on start failed")
         await telegram.send_message(
             chat_id,
-            "👋 <b>Trading Journal Bot</b>\n\n"
-            "Send me a <b>screenshot</b> of any trade (profit, loss, or breakeven) "
-            "with an optional caption, or just describe the trade in text. I'll read "
-            "it and log it to your journal automatically.\n\n"
+            f"👋 <b>Welcome, {_html_escape(user['username'])}!</b>\n\n"
+            "Send me a <b>screenshot</b> of any trade with an optional caption (or "
+            "describe it in text) and I'll log it to <b>your</b> private journal.\n\n"
             "<b>Commands</b>\n"
-            "/stats — quick performance summary\n"
+            "/stats — your performance summary\n"
             "/news — upcoming high-impact US events\n"
-            "/undo — remove the last logged trade\n"
-            "/unsubscribe — stop high-impact US news alerts\n\n"
-            "🔔 You're subscribed to <b>high-impact US news alerts</b> (USD &amp; Gold "
-            "analysis before and after each release).\n\n"
-            f"📊 Your live journal:\n{_dashboard_url()}",
+            "/undo — remove your last logged trade\n"
+            "/unsubscribe — stop news alerts\n\n"
+            "🔔 You're subscribed to high-impact US news alerts (USD &amp; Gold analysis).\n\n"
+            f"📊 Log in to your dashboard:\n{_dashboard_url()}",
         )
         return True
 
+    # Admin-only: register a new user.
+    if cmd == "adduser":
+        if not (user and user.get("role") == "admin"):
+            await telegram.send_message(chat_id, "Only the owner can add users.")
+            return True
+        parts = text.split()
+        if len(parts) < 5:
+            await telegram.send_message(
+                chat_id,
+                "Usage: <code>/adduser &lt;login&gt; &lt;password&gt; &lt;telegram_username&gt; &lt;sheet_id&gt;</code>\n\n"
+                "First create a new Google Sheet for them, share it with the service "
+                "account email (Editor), and paste its ID as the last argument.",
+            )
+            return True
+        login, password, tg, sheet_id = parts[1], parts[2], parts[3].lstrip("@"), parts[4]
+        if await storage.get_user_by_login(login) or await users.by_telegram(tg):
+            await telegram.send_message(chat_id, f"A user with that login or Telegram username already exists.")
+            return True
+        await storage.add_user(login, auth.hash_password(password), tg, sheet_id, role="user")
+        await telegram.send_message(
+            chat_id,
+            f"✅ Added <b>{_html_escape(login)}</b> (Telegram @{_html_escape(tg)}).\n"
+            "They can now log trades via this bot and log into the dashboard.\n\n"
+            "⚠️ Delete your /adduser message above — it contains their password.",
+        )
+        return True
+
+    # Everything below requires a registered user.
+    if user is None:
+        await telegram.send_message(chat_id, "You're not registered yet. Send /start for details.")
+        return True
+
     if cmd == "stats":
-        trades = await storage.read_trades()
+        trades = await storage.read_trades(user["sheet_id"])
         await telegram.send_message(chat_id, summarize(trades) + f"\n\n📊 {_dashboard_url()}")
         return True
 
     if cmd == "undo":
-        removed = await storage.delete_last_trade()
+        removed = await storage.delete_last_trade(user["sheet_id"])
         await telegram.send_message(
             chat_id,
-            "🗑️ Removed the last logged trade." if removed else "Nothing to undo — your journal is empty.",
+            "🗑️ Removed your last logged trade." if removed else "Nothing to undo — your journal is empty.",
         )
         return True
 
     if cmd in ("subscribe", "sub"):
-        await storage.add_subscriber(chat_id, trader)
+        await storage.add_subscriber(chat_id, user["username"])
         await telegram.send_message(chat_id, "🔔 Subscribed to high-impact US news alerts.")
         return True
 
@@ -158,7 +198,7 @@ async def _analyze_and_log(
     caption: str,
     images: list[bytes],
     source: str,
-    trader: str,
+    user: dict,
     file_ids: list[str] | None = None,
 ) -> None:
     await telegram.send_chat_action(chat_id)
@@ -174,13 +214,13 @@ async def _analyze_and_log(
 
     # Keep all screenshot IDs (comma-separated) so the dashboard can show each.
     file_id_str = ",".join(fid for fid in (file_ids or []) if fid)
-    await storage.append_trade(trade, source, trader=trader, file_id=file_id_str)
-    # Active traders are auto-subscribed to news alerts (opt out with /unsubscribe).
+    # Route to THIS user's own sheet (their private database).
+    await storage.append_trade(user["sheet_id"], trade, source, trader=user["username"], file_id=file_id_str)
     try:
-        await storage.add_subscriber(chat_id, trader)
+        await storage.add_subscriber(chat_id, user["username"])
     except Exception:  # noqa: BLE001
         log.exception("auto-subscribe on trade failed")
-    await telegram.send_message(chat_id, _confirmation(trade, trader))
+    await telegram.send_message(chat_id, _confirmation(trade, user["username"]))
 
 
 async def _flush_media_group(mgid: str) -> None:
@@ -200,7 +240,7 @@ async def _flush_media_group(mgid: str) -> None:
                 log.exception("Could not download album image %s", fid)
         await _analyze_and_log(
             chat_id, grp["caption"], images, source="album",
-            trader=grp["trader"], file_ids=file_ids,
+            user=grp["user"], file_ids=file_ids,
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("Failed to process album %s", mgid)
@@ -223,11 +263,24 @@ async def handle_update(update: dict[str, Any]) -> None:
     text = message.get("text", "") or ""
     caption = message.get("caption", "") or ""
     trader = _trader_name(message)
+    tg_username = (message.get("from") or {}).get("username") or ""
+
+    # Resolve the sender to a registered user (None = not registered).
+    user = await users.by_telegram(tg_username)
 
     # Commands
     if text.startswith("/"):
-        if await _handle_command(chat_id, text, trader):
+        if await _handle_command(chat_id, text, trader, tg_username, user):
             return
+
+    # Only registered users may log trades — each into their own sheet.
+    if user is None:
+        await telegram.send_message(
+            chat_id,
+            "You're not registered to log trades here. Send /start for details, "
+            "or ask the owner to add you.",
+        )
+        return
 
     photo = _largest_photo(message)
     media_group_id = message.get("media_group_id")
@@ -236,7 +289,7 @@ async def handle_update(update: dict[str, Any]) -> None:
     if photo and media_group_id:
         grp = _media_groups.get(media_group_id)
         if grp is None:
-            grp = {"file_ids": [], "caption": "", "chat_id": chat_id, "trader": trader}
+            grp = {"file_ids": [], "caption": "", "chat_id": chat_id, "user": user}
             _media_groups[media_group_id] = grp
             asyncio.create_task(_flush_media_group(media_group_id))
         grp["file_ids"].append(photo["file_id"])
@@ -249,10 +302,10 @@ async def handle_update(update: dict[str, Any]) -> None:
             image_bytes = await telegram.get_file_bytes(photo["file_id"])
             await _analyze_and_log(
                 chat_id, caption, [image_bytes], source="photo",
-                trader=trader, file_ids=[photo["file_id"]],
+                user=user, file_ids=[photo["file_id"]],
             )
         elif text.strip():
-            await _analyze_and_log(chat_id, text, [], source="text", trader=trader)
+            await _analyze_and_log(chat_id, text, [], source="text", user=user)
         else:
             await telegram.send_message(
                 chat_id,

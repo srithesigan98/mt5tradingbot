@@ -70,6 +70,14 @@ You send a screenshot ──▶ Telegram bot (webhook)
 - Extra template fields (session, setup/strategy, discipline rating) are captured
   and shown on the dashboard and in the trade popup.
 
+### Multi-user (login + per-user databases)
+One deployment can serve many users: the dashboard has a **login**, each user
+sees only their own journal, and the single bot routes each person's trades into
+**their own Google Sheet** by Telegram username. You (admin) can switch between
+users. Requires `OWNER_USERNAME` / `OWNER_PASSWORD` / `OWNER_TELEGRAM_USERNAME`,
+and you add people with `/adduser` in Telegram. Full guide:
+**[docs/MULTI-USER.md](docs/MULTI-USER.md)**.
+
 ### How multi-trader works
 Every message carries the sender's Telegram identity. The bot saves that as a
 `trader` column in the sheet and tags the trade with it — no configuration
