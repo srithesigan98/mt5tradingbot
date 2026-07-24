@@ -217,10 +217,29 @@ def mark_notified(key: str, event: str) -> None:
                   value_input_option="USER_ENTERED")
 
 
-# --- News analysis archive (shown on the dashboard) ----------------------
+# --- News analysis archive (current day only; refreshes each day) --------
+
+def _prune_old_analyses_sync(ws: gspread.Worksheet) -> None:
+    """Delete rows not from today. Entries are appended chronologically, so old
+    rows form a contiguous block at the top."""
+    dates = ws.col_values(1)  # logged_at column (index 0 is the header)
+    if len(dates) <= 1:
+        return
+    today = config.today_local_iso()
+    first_today = None
+    for i, val in enumerate(dates[1:], start=2):  # 1-based sheet rows
+        if str(val)[:10] == today:
+            first_today = i
+            break
+    if first_today is None:            # nothing from today -> clear all data rows
+        ws.delete_rows(2, len(dates))
+    elif first_today > 2:              # drop the older block above today's rows
+        ws.delete_rows(2, first_today - 1)
+
 
 def _log_analysis_sync(entry: dict[str, Any]) -> None:
     ws = _get_ws("NewsAnalysis", NEWSANALYSIS_HEADERS)
+    _prune_old_analyses_sync(ws)  # keep only the current day's journal
     ws.append_row(
         [
             config.now_local().isoformat(timespec="seconds"),
@@ -238,7 +257,9 @@ def _log_analysis_sync(entry: dict[str, Any]) -> None:
 
 def _read_analyses_sync(limit: int) -> list[dict[str, Any]]:
     ws = _get_ws("NewsAnalysis", NEWSANALYSIS_HEADERS)
-    return list(reversed(ws.get_all_records()))[:limit]
+    today = config.today_local_iso()
+    rows = [r for r in ws.get_all_records() if str(r.get("logged_at", ""))[:10] == today]
+    return list(reversed(rows))[:limit]
 
 
 async def log_analysis(entry: dict[str, Any]) -> None:

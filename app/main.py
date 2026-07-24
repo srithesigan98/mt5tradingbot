@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import auth, bot, config, storage, users
-from .stats import compute
+from .stats import compute, filter_by_trader, trader_names
 
 COOKIE = "tj_session"
 
@@ -87,7 +87,11 @@ def _require_user(request: Request) -> dict:
 
 
 @app.get("/api/trades")
-async def api_trades(request: Request, user: str = Query(default="")) -> JSONResponse:
+async def api_trades(
+    request: Request,
+    user: str = Query(default=""),
+    trader: str = Query(default=""),
+) -> JSONResponse:
     me = _require_user(request)
 
     # Which user's sheet to show. Admins may view any user via ?user=<username>.
@@ -107,10 +111,18 @@ async def api_trades(request: Request, user: str = Query(default="")) -> JSONRes
         log.exception("Failed to read trades")
         raise HTTPException(status_code=500, detail="could not read journal")
 
+    # Within the selected sheet, allow viewing a specific trader's profile.
+    traders = trader_names(rows)
+    selected_trader = trader.strip()
+    if selected_trader:
+        rows = filter_by_trader(rows, selected_trader)
+
     payload = compute(rows)
     payload["me"] = {"username": me["username"], "role": me.get("role", "user")}
     payload["viewers"] = viewers
     payload["selected_user"] = target["username"]
+    payload["traders"] = traders
+    payload["selected_trader"] = selected_trader
     return JSONResponse(payload)
 
 
@@ -147,7 +159,6 @@ async def api_image(request: Request, file_id: str) -> Response:
 async def api_news() -> JSONResponse:
     from . import news
     payload = await news.calendar_payload(limit=15)
-    payload["embed_url"] = config.ECON_CALENDAR_EMBED_URL
     return JSONResponse(payload)
 
 

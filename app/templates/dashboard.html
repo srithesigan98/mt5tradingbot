@@ -148,6 +148,7 @@
     </div>
 
     <div class="tabs" id="tabs"></div>
+    <div class="tabs" id="tradertabs"></div>
     <div class="kpis" id="kpis"></div>
 
     <div class="viewtabs" id="viewtabs">
@@ -216,19 +217,8 @@
         <div id="newsList"><div class="empty">Loading…</div></div>
       </div>
       <div class="card" style="margin-top:14px">
-        <h2>🧠 Latest news analysis (USD &amp; Gold)</h2>
+        <h2>🧠 Today's news analysis (USD &amp; Gold)</h2>
         <div id="analysisList"><div class="empty">Loading…</div></div>
-      </div>
-      <div class="card" style="margin-top:14px">
-        <h2>Economic calendar (Myfxbook)</h2>
-        <div style="border-radius:12px;overflow:hidden;border:1px solid var(--border)">
-          <iframe id="calFrame" src="" style="width:100%;height:560px;border:0" loading="lazy"></iframe>
-        </div>
-        <div style="color:var(--muted);font-size:12px;margin-top:8px">
-          If the embedded calendar is blank, some providers block framing — the
-          high-impact list above always works. Source:
-          <a id="calLink" href="#" target="_blank" rel="noopener">Myfxbook</a>.
-        </div>
       </div>
     </div>
 
@@ -258,7 +248,7 @@
     const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neu");
     const parseDate = (s) => { const p = (s||"").split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0], p[1]-1, p[2]) : null; };
 
-    let state = { user: "", view: "summary", month: null, data: null, charts: {},
+    let state = { user: "", trader: "", view: "summary", month: null, data: null, charts: {},
                   groupBy: "instrument", metric: "pnl" };
 
     /* ---------- User switcher (admin sees one tab per user) ---------- */
@@ -269,11 +259,26 @@
       const el = document.getElementById("tabs");
       const viewers = s.viewers || [];
       // Only admins (more than one viewable user) get a switcher.
-      if (me.role !== "admin" || viewers.length <= 1) { el.innerHTML = ""; return; }
-      const sel = s.selected_user || me.username;
-      el.innerHTML = viewers.map(u =>
-        `<button class="tab ${u === sel ? "active" : ""}" data-user="${esc(u)}">${esc(u)}</button>`).join("");
-      el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.user = b.dataset.user; load(); });
+      if (me.role !== "admin" || viewers.length <= 1) { el.innerHTML = ""; }
+      else {
+        const sel = s.selected_user || me.username;
+        el.innerHTML = viewers.map(u =>
+          `<button class="tab ${u === sel ? "active" : ""}" data-user="${esc(u)}">${esc(u)}</button>`).join("");
+        // Switching account resets the trader filter.
+        el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.user = b.dataset.user; state.trader = ""; load(); });
+      }
+      renderTraderTabs(s);
+    }
+
+    /* ---------- Trader profiles (within the current account's data) ---------- */
+    function renderTraderTabs(s) {
+      const el = document.getElementById("tradertabs");
+      const traders = s.traders || [];
+      if (traders.length <= 1) { el.innerHTML = ""; return; }  // nothing to switch between
+      const sel = s.selected_trader || "";
+      const mk = (name, label) => `<button class="tab ${sel === name ? "active" : ""}" data-trader="${esc(name)}">${esc(label)}</button>`;
+      el.innerHTML = mk("", "All traders") + traders.map(t => mk(t, t)).join("");
+      el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.trader = b.dataset.trader; load(); });
     }
 
     /* ---------- KPI cards ---------- */
@@ -534,11 +539,9 @@
       const list = document.getElementById("newsList");
       try {
         const d = await (await fetch("/api/news")).json();
-        const frame = document.getElementById("calFrame"), link = document.getElementById("calLink");
-        if (d.embed_url && frame.src !== d.embed_url) { frame.src = d.embed_url; link.href = d.embed_url; }
         if (d.error) { list.innerHTML = `<div class="empty">The live feed is busy right now — it retries automatically and keeps a cached copy once it succeeds.<br><small>${esc(d.error)}</small></div>`; return; }
         if (!d.events || !d.events.length) {
-          list.innerHTML = `<div class="empty">No matching US events in the current feed window (${d.total_fetched || 0} events checked).<br><small>The embedded Myfxbook calendar below shows the full schedule.</small></div>`;
+          list.innerHTML = `<div class="empty">No matching upcoming US events in the current feed window (${d.total_fetched || 0} events checked).</div>`;
           return;
         }
         const staleNote = d.source === "sheet" && d.fetched_at
@@ -560,7 +563,7 @@
         const d = await (await fetch("/api/news/analyses")).json();
         const rows = d.analyses || [];
         if (!rows.length) {
-          box.innerHTML = `<div class="empty">No analyses yet — they appear here automatically when news alerts fire (and each morning for the gold outlook).</div>`;
+          box.innerHTML = `<div class="empty">No analyses today yet — they appear here as news alerts fire (and each morning for the gold outlook). Older days are cleared automatically.</div>`;
           return;
         }
         const phaseTag = (p) => p === "pre" ? "🔔 Heads-up" : p === "post" ? "📣 Released" : p === "gold" ? "🟡 Gold outlook" : p;
@@ -606,7 +609,10 @@
     /* ---------- Load ---------- */
     async function load() {
       try {
-        const url = "/api/trades" + (state.user ? "?user=" + encodeURIComponent(state.user) : "");
+        const params = new URLSearchParams();
+        if (state.user) params.set("user", state.user);
+        if (state.trader) params.set("trader", state.trader);
+        const url = "/api/trades" + (params.toString() ? "?" + params.toString() : "");
         const res = await fetch(url);
         if (res.status === 401) { window.location.href = "/login"; return; }
         const s = await res.json(); state.data = s;
