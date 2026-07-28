@@ -38,6 +38,9 @@
       padding: 10px 18px; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; }
     .viewtab.active { background: linear-gradient(135deg, #3a2a8f, #6c4cf1); color: #fff; border-color: transparent; }
 
+    .modebar { display: inline-flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 12px; }
+    .modebtn { border: none; background: transparent; color: var(--ink-2); padding: 8px 16px; border-radius: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .modebtn.active { background: var(--purple); color: #fff; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
       padding: 16px 18px; box-shadow: 0 1px 3px rgba(60, 40, 140, 0.05); }
     .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--ink-2); font-weight: 600; }
@@ -147,6 +150,10 @@
       </div>
     </div>
 
+    <div class="modebar" id="modebar" style="display:none">
+      <button class="modebtn active" data-mode="single">By trader</button>
+      <button class="modebtn" data-mode="combined">Combined</button>
+    </div>
     <div class="tabs" id="tabs"></div>
     <div class="kpis" id="kpis"></div>
 
@@ -247,22 +254,38 @@
     const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neu");
     const parseDate = (s) => { const p = (s||"").split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0], p[1]-1, p[2]) : null; };
 
-    let state = { trader: "", view: "summary", month: null, data: null, charts: {},
-                  groupBy: "instrument", metric: "pnl" };
+    // mode: "single" = one trader at a time (default), "combined" = all traders merged.
+    let state = { mode: "single", trader: "", view: "summary", month: null, data: null,
+                  charts: {}, groupBy: "instrument", metric: "pnl" };
 
-    /* ---------- Trader tabs (filter the whole dashboard by trader) ---------- */
-    function renderTraderTabs(s) {
+    /* ---------- Mode toggle + trader tabs ---------- */
+    function renderControls(s) {
       const me = s.me || { username: "", role: "user" };
       document.getElementById("userbox").textContent =
         me.username + (me.role === "admin" ? " (admin)" : "");
-      const el = document.getElementById("tabs");
       const traders = s.traders || [];
-      if (traders.length <= 1) { el.innerHTML = ""; return; }  // only one trader — nothing to filter
-      const sel = s.selected_trader || "";
-      const mk = (name, label) => `<button class="tab ${sel === name ? "active" : ""}" data-trader="${esc(name)}">${esc(label)}</button>`;
-      el.innerHTML = mk("", "All traders") + traders.map(t => mk(t, t)).join("");
-      el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.trader = b.dataset.trader; load(); });
+      const modebar = document.getElementById("modebar");
+      const tabs = document.getElementById("tabs");
+      // Only one trader (or none): nothing to combine/differentiate.
+      if (traders.length <= 1) { modebar.style.display = "none"; tabs.innerHTML = ""; return; }
+
+      modebar.style.display = "inline-flex";
+      modebar.querySelectorAll(".modebtn").forEach(b => b.classList.toggle("active", b.dataset.mode === state.mode));
+
+      if (state.mode === "single") {
+        const sel = state.trader || traders[0];
+        tabs.innerHTML = traders.map(t =>
+          `<button class="tab ${t === sel ? "active" : ""}" data-trader="${esc(t)}">${esc(t)}</button>`).join("");
+        tabs.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.trader = b.dataset.trader; load(); });
+      } else {
+        tabs.innerHTML = "";  // combined: no per-trader tabs
+      }
     }
+
+    document.querySelectorAll("#modebar .modebtn").forEach(b => b.onclick = () => {
+      state.mode = b.dataset.mode;   // "single" keeps state.trader; "combined" ignores it
+      load();
+    });
 
     /* ---------- KPI cards ---------- */
     function donut(id, segments, colors, centerText) {
@@ -592,12 +615,19 @@
     /* ---------- Load ---------- */
     async function load() {
       try {
-        const url = "/api/trades" + (state.trader ? "?trader=" + encodeURIComponent(state.trader) : "");
+        const single = state.mode === "single";
+        const url = "/api/trades" + (single && state.trader ? "?trader=" + encodeURIComponent(state.trader) : "");
         const res = await fetch(url);
         if (res.status === 401) { window.location.href = "/login"; return; }
-        const s = await res.json(); state.data = s;
+        const s = await res.json();
+        // Default view = one trader only: on first load pick the first trader.
+        if (single && !state.trader && (s.traders || []).length > 1) {
+          state.trader = s.traders[0];
+          return load();
+        }
+        state.data = s;
         if (!state.month) { const last = s.trades.length ? s.trades[s.trades.length - 1].date : ""; const d = parseDate(last); state.month = d ? new Date(d.getFullYear(), d.getMonth(), 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1); }
-        renderTraderTabs(s);
+        renderControls(s);
         renderKpis(s);
         renderView(s.trades);
         renderTable(s.trades);
