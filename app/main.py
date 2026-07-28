@@ -220,4 +220,7 @@ async def logout() -> Response:
 async def dashboard(request: Request) -> Response:
     if not _current_user(request):
         return RedirectResponse("/login", status_code=303)
-    return _TEMPLATES.TemplateResponse(request, "dashboard.html", {})
+    resp = _TEMPLATES.TemplateResponse(request, "dashboard.html", {})
+    # Never let a browser/CDN serve a stale dashboard after a deploy.
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
