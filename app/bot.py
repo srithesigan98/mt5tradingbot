@@ -214,13 +214,16 @@ async def _analyze_and_log(
 
     # Keep all screenshot IDs (comma-separated) so the dashboard can show each.
     file_id_str = ",".join(fid for fid in (file_ids or []) if fid)
-    # Route to THIS user's own sheet (their private database).
-    await storage.append_trade(user["sheet_id"], trade, source, trader=user["username"], file_id=file_id_str)
+    # Tag with the trader named in the message (one account can log for several
+    # traders); fall back to the account's login name when none is stated.
+    trader_name = (trade.get("trader") or "").strip() or user["username"]
+    # Route to THIS account's own sheet (their private database).
+    await storage.append_trade(user["sheet_id"], trade, source, trader=trader_name, file_id=file_id_str)
     try:
         await storage.add_subscriber(chat_id, user["username"])
     except Exception:  # noqa: BLE001
         log.exception("auto-subscribe on trade failed")
-    await telegram.send_message(chat_id, _confirmation(trade, user["username"]))
+    await telegram.send_message(chat_id, _confirmation(trade, trader_name))
 
 
 async def _flush_media_group(mgid: str) -> None:

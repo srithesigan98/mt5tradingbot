@@ -40,6 +40,14 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
                 "type": ["string", "null"],
                 "description": "The symbol traded, e.g. XAUUSD, EURJPY, US30, BTCUSD.",
             },
+            "trader": {
+                "type": ["string", "null"],
+                "description": (
+                    "The trader's name if the message names one (e.g. a 'Trader:' "
+                    "line, or 'by <name>'). One account may be shared by several "
+                    "traders. Return null if no trader name is stated."
+                ),
+            },
             "direction": {
                 "type": "string",
                 "enum": ["buy", "sell", "long", "short", "unknown"],
@@ -115,7 +123,7 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
             },
         },
         "required": [
-            "is_trade_related", "instrument", "direction", "outcome",
+            "is_trade_related", "instrument", "trader", "direction", "outcome",
             "pnl_amount", "pnl_currency", "pips", "r_multiple", "lot_size",
             "entry_price", "exit_price", "stop_loss", "take_profit",
             "trade_date", "session", "setup", "discipline_rating",
@@ -130,8 +138,10 @@ _SYSTEM_PROMPT = (
     "CRITICAL RULES:\n"
     "1. The trader's WRITTEN TEXT is the authoritative source for every detail "
     "(instrument, direction, entry, exit, SL, TP, profit, outcome, date, session, "
-    "setup, notes). When the text states a value, use exactly that value. Use the "
-    "screenshots only to fill gaps the text doesn't mention, or to confirm.\n"
+    "setup, trader name, notes). When the text states a value, use exactly that "
+    "value. Use the screenshots only to fill gaps the text doesn't mention.\n"
+    "1b. If the message names a trader (e.g. a 'Trader:' line), extract it — one "
+    "account may log trades for several traders, and each is tracked separately.\n"
     "2. You may receive MULTIPLE screenshots — they all describe the SAME single "
     "trade. Never split them into multiple trades.\n"
     "3. If multiple entries or partial positions appear, COMPOUND them into ONE "
