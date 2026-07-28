@@ -148,7 +148,6 @@
     </div>
 
     <div class="tabs" id="tabs"></div>
-    <div class="tabs" id="tradertabs"></div>
     <div class="kpis" id="kpis"></div>
 
     <div class="viewtabs" id="viewtabs">
@@ -248,33 +247,17 @@
     const signClass = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "neu");
     const parseDate = (s) => { const p = (s||"").split("-").map(Number); return (p.length===3 && p[0]) ? new Date(p[0], p[1]-1, p[2]) : null; };
 
-    let state = { user: "", trader: "", view: "summary", month: null, data: null, charts: {},
+    let state = { trader: "", view: "summary", month: null, data: null, charts: {},
                   groupBy: "instrument", metric: "pnl" };
 
-    /* ---------- User switcher (admin sees one tab per user) ---------- */
-    function renderUsers(s) {
+    /* ---------- Trader tabs (filter the whole dashboard by trader) ---------- */
+    function renderTraderTabs(s) {
       const me = s.me || { username: "", role: "user" };
       document.getElementById("userbox").textContent =
         me.username + (me.role === "admin" ? " (admin)" : "");
       const el = document.getElementById("tabs");
-      const viewers = s.viewers || [];
-      // Only admins (more than one viewable user) get a switcher.
-      if (me.role !== "admin" || viewers.length <= 1) { el.innerHTML = ""; }
-      else {
-        const sel = s.selected_user || me.username;
-        el.innerHTML = viewers.map(u =>
-          `<button class="tab ${u === sel ? "active" : ""}" data-user="${esc(u)}">${esc(u)}</button>`).join("");
-        // Switching account resets the trader filter.
-        el.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.user = b.dataset.user; state.trader = ""; load(); });
-      }
-      renderTraderTabs(s);
-    }
-
-    /* ---------- Trader profiles (within the current account's data) ---------- */
-    function renderTraderTabs(s) {
-      const el = document.getElementById("tradertabs");
       const traders = s.traders || [];
-      if (traders.length <= 1) { el.innerHTML = ""; return; }  // nothing to switch between
+      if (traders.length <= 1) { el.innerHTML = ""; return; }  // only one trader — nothing to filter
       const sel = s.selected_trader || "";
       const mk = (name, label) => `<button class="tab ${sel === name ? "active" : ""}" data-trader="${esc(name)}">${esc(label)}</button>`;
       el.innerHTML = mk("", "All traders") + traders.map(t => mk(t, t)).join("");
@@ -609,16 +592,12 @@
     /* ---------- Load ---------- */
     async function load() {
       try {
-        const params = new URLSearchParams();
-        if (state.user) params.set("user", state.user);
-        if (state.trader) params.set("trader", state.trader);
-        const url = "/api/trades" + (params.toString() ? "?" + params.toString() : "");
+        const url = "/api/trades" + (state.trader ? "?trader=" + encodeURIComponent(state.trader) : "");
         const res = await fetch(url);
         if (res.status === 401) { window.location.href = "/login"; return; }
         const s = await res.json(); state.data = s;
-        state.user = s.selected_user || "";
         if (!state.month) { const last = s.trades.length ? s.trades[s.trades.length - 1].date : ""; const d = parseDate(last); state.month = d ? new Date(d.getFullYear(), d.getMonth(), 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1); }
-        renderUsers(s);
+        renderTraderTabs(s);
         renderKpis(s);
         renderView(s.trades);
         renderTable(s.trades);

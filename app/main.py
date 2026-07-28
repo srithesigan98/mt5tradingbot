@@ -87,31 +87,32 @@ def _require_user(request: Request) -> dict:
 
 
 @app.get("/api/trades")
-async def api_trades(
-    request: Request,
-    user: str = Query(default=""),
-    trader: str = Query(default=""),
-) -> JSONResponse:
+async def api_trades(request: Request, trader: str = Query(default="")) -> JSONResponse:
     me = _require_user(request)
 
-    # Which user's sheet to show. Admins may view any user via ?user=<username>.
-    target = me
-    viewers: list[str] = [me["username"]]
-    if me.get("role") == "admin":
-        everyone = await users.all_users()
-        viewers = [u["username"] for u in everyone]
-        if user:
-            match = next((u for u in everyone if u["username"].lower() == user.lower()), None)
-            if match:
-                target = match
-
+    # Build the dataset. An admin sees every trader (all accounts combined);
+    # a normal user sees only their own sheet. Either way the dashboard then
+    # filters by the `trader` column (the name in the table).
     try:
-        rows = await storage.read_trades(target["sheet_id"])
+        if me.get("role") == "admin":
+            rows = []
+            seen: set[str] = set()
+            for u in await users.all_users():
+                sid = u.get("sheet_id") or ""
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                try:
+                    rows.extend(await storage.read_trades(sid))
+                except Exception:  # noqa: BLE001 — one bad sheet shouldn't break the rest
+                    log.exception("Failed to read sheet %s", sid)
+        else:
+            rows = await storage.read_trades(me["sheet_id"])
     except Exception:  # noqa: BLE001
         log.exception("Failed to read trades")
         raise HTTPException(status_code=500, detail="could not read journal")
 
-    # Within the selected sheet, allow viewing a specific trader's profile.
+    # Distinct traders present in the data, and the per-trader filter.
     traders = trader_names(rows)
     selected_trader = trader.strip()
     if selected_trader:
@@ -119,8 +120,6 @@ async def api_trades(
 
     payload = compute(rows)
     payload["me"] = {"username": me["username"], "role": me.get("role", "user")}
-    payload["viewers"] = viewers
-    payload["selected_user"] = target["username"]
     payload["traders"] = traders
     payload["selected_trader"] = selected_trader
     return JSONResponse(payload)
