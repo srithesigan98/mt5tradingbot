@@ -184,11 +184,12 @@
     <div class="topbar">
       <div class="brand">
         <div class="logo">📈</div>
-        <div><h1>Trading Journal</h1><div class="sub">Auto-updated from Telegram · build 2</div></div>
+        <div><h1 id="siteTitle">Trading Journal</h1><div class="sub" id="siteSubtitle">Auto-updated from Telegram</div></div>
       </div>
       <div style="display:flex;align-items:center;gap:14px">
         <div class="refresh" id="updated"></div>
         <div id="userbox" style="font-size:13px;color:var(--ink-2)"></div>
+        <a href="/admin" id="adminLink" style="display:none;font-size:13px;color:var(--purple);font-weight:600;text-decoration:none">Admin</a>
         <a href="/logout" style="font-size:13px;color:var(--purple);font-weight:600;text-decoration:none">Log out</a>
       </div>
     </div>
@@ -300,12 +301,31 @@
     // mode: "single" = one trader at a time (default), "combined" = all traders merged.
     let state = { mode: "single", trader: "", view: "summary", month: null, data: null,
                   charts: {}, groupBy: "instrument", metric: "pnl" };
+    let _appearanceApplied = false;
+
+    /* ---------- Appearance (admin-configurable branding + defaults) ---------- */
+    function traderLabel(raw) {
+      const map = (state.data && state.data.appearance && state.data.appearance.trader_display_names) || {};
+      return map[raw] || raw;
+    }
+    function applyAppearance(s) {
+      const a = s.appearance || {};
+      if (a.site_title) document.getElementById("siteTitle").textContent = a.site_title;
+      if (a.site_subtitle) document.getElementById("siteSubtitle").textContent = a.site_subtitle;
+      if (a.default_view && a.default_view !== state.view) {
+        state.view = a.default_view;
+        document.querySelectorAll("#viewtabs .viewtab").forEach(b => b.classList.toggle("active", b.dataset.view === a.default_view));
+        ["summary", "charts", "cross", "calendar"].forEach(k =>
+          document.getElementById("view-" + k).style.display = k === a.default_view ? "" : "none");
+      }
+    }
 
     /* ---------- Mode toggle + trader tabs ---------- */
     function renderControls(s) {
       const me = s.me || { username: "", role: "user" };
       document.getElementById("userbox").textContent =
         me.username + (me.role === "admin" ? " (admin)" : "");
+      document.getElementById("adminLink").style.display = me.role === "admin" ? "" : "none";
       const traders = s.traders || [];
       const modebar = document.getElementById("modebar");
       const tabs = document.getElementById("tabs");
@@ -318,7 +338,7 @@
       if (state.mode === "single") {
         const sel = state.trader || traders[0];
         tabs.innerHTML = traders.map(t =>
-          `<button class="tab ${t === sel ? "active" : ""}" data-trader="${esc(t)}">${esc(t)}</button>`).join("");
+          `<button class="tab ${t === sel ? "active" : ""}" data-trader="${esc(t)}">${esc(traderLabel(t))}</button>`).join("");
         tabs.querySelectorAll(".tab").forEach(b => b.onclick = () => { state.trader = b.dataset.trader; load(); });
       } else {
         tabs.innerHTML = "";  // combined: no per-trader tabs
@@ -341,14 +361,17 @@
     }
     function renderKpis(s) {
       const pf = s.profit_factor;
-      document.getElementById("kpis").innerHTML = `
-        <div class="card kpi"><div class="label">Net P&amp;L</div><div class="value ${signClass(s.net_pnl)}">${money(s.net_pnl)}</div><div class="hint">${s.total_trades} trades</div></div>
-        <div class="card kpi gauge"><div><div class="label">Trade win %</div><div class="value neu">${s.win_rate}%</div><div class="hint">${s.wins}W · ${s.losses}L · ${s.breakeven}BE</div></div><div class="donut"><canvas id="winDonut"></canvas><div class="center"></div></div></div>
-        <div class="card kpi gauge"><div><div class="label">Profit factor</div><div class="value neu">${pf === null ? "—" : pf}</div><div class="hint">${money(s.gross_profit)} / ${money(s.gross_loss)}</div></div><div class="donut"><canvas id="pfDonut"></canvas><div class="center"></div></div></div>
-        <div class="card kpi"><div class="label">Trade expectancy</div><div class="value ${signClass(s.expectancy || 0)}">${s.expectancy === null ? "—" : money(s.expectancy)}</div><div class="hint">avg P&amp;L per trade</div></div>
-        <div class="card kpi"><div class="label">Avg win / loss</div><div class="value neu">${s.avg_win === null ? "—" : money(s.avg_win)} <span class="muted">/</span> ${s.avg_loss === null ? "—" : money(s.avg_loss)}</div><div class="hint">Avg R: ${s.avg_r === null ? "—" : s.avg_r}</div></div>`;
-      donut("winDonut", [s.wins || 0, s.losses || 0, s.breakeven || 0].some(v => v > 0) ? [s.wins, s.losses, s.breakeven] : [1], [css("--good"), css("--bad"), css("--be")], `${s.win_rate}%`);
-      donut("pfDonut", (s.gross_profit || s.gross_loss) ? [s.gross_profit, s.gross_loss] : [1], [css("--good"), css("--bad")], pf === null ? "—" : String(pf));
+      const shown = new Set((s.appearance && s.appearance.kpi_cards) || ["net_pnl", "win_rate", "profit_factor", "expectancy", "avg_win_loss"]);
+      const cards = {
+        net_pnl: `<div class="card kpi"><div class="label">Net P&amp;L</div><div class="value ${signClass(s.net_pnl)}">${money(s.net_pnl)}</div><div class="hint">${s.total_trades} trades</div></div>`,
+        win_rate: `<div class="card kpi gauge"><div><div class="label">Trade win %</div><div class="value neu">${s.win_rate}%</div><div class="hint">${s.wins}W · ${s.losses}L · ${s.breakeven}BE</div></div><div class="donut"><canvas id="winDonut"></canvas><div class="center"></div></div></div>`,
+        profit_factor: `<div class="card kpi gauge"><div><div class="label">Profit factor</div><div class="value neu">${pf === null ? "—" : pf}</div><div class="hint">${money(s.gross_profit)} / ${money(s.gross_loss)}</div></div><div class="donut"><canvas id="pfDonut"></canvas><div class="center"></div></div></div>`,
+        expectancy: `<div class="card kpi"><div class="label">Trade expectancy</div><div class="value ${signClass(s.expectancy || 0)}">${s.expectancy === null ? "—" : money(s.expectancy)}</div><div class="hint">avg P&amp;L per trade</div></div>`,
+        avg_win_loss: `<div class="card kpi"><div class="label">Avg win / loss</div><div class="value neu">${s.avg_win === null ? "—" : money(s.avg_win)} <span class="muted">/</span> ${s.avg_loss === null ? "—" : money(s.avg_loss)}</div><div class="hint">Avg R: ${s.avg_r === null ? "—" : s.avg_r}</div></div>`,
+      };
+      document.getElementById("kpis").innerHTML = Object.keys(cards).filter(k => shown.has(k)).map(k => cards[k]).join("");
+      if (shown.has("win_rate")) donut("winDonut", [s.wins || 0, s.losses || 0, s.breakeven || 0].some(v => v > 0) ? [s.wins, s.losses, s.breakeven] : [1], [css("--good"), css("--bad"), css("--be")], `${s.win_rate}%`);
+      if (shown.has("profit_factor")) donut("pfDonut", (s.gross_profit || s.gross_loss) ? [s.gross_profit, s.gross_loss] : [1], [css("--good"), css("--bad")], pf === null ? "—" : String(pf));
     }
 
     /* ---------- Day-of-week tiles ---------- */
@@ -514,7 +537,7 @@
       tbody.innerHTML = trades.slice().reverse().map(t => {
         const outcome = t.outcome || "unknown"; const nImg = (t.file_ids || []).length;
         return `<tr data-index="${t.index}"><td>${t.index}</td><td>${esc(t.date || (t.logged_at || "").slice(0, 10))}</td>
-          <td>${t.trader ? `<span class="trader-chip">${esc(t.trader)}</span>` : "—"}</td><td><b>${esc(t.instrument || "—")}</b></td>
+          <td>${t.trader ? `<span class="trader-chip">${esc(traderLabel(t.trader))}</span>` : "—"}</td><td><b>${esc(t.instrument || "—")}</b></td>
           <td>${esc((t.direction || "").toUpperCase())}</td><td><span class="pill ${outcome}">${outcome}</span></td>
           <td class="num ${signClass(t.pnl_amount || 0)}">${money(t.pnl_amount)}</td><td class="num">${fmt(t.r_multiple)}</td>
           <td class="num ${signClass(t.cumulative_pnl)}">${money(t.cumulative_pnl)}</td>
@@ -563,7 +586,7 @@
       const imgs = (t.file_ids || []).map(fid => `<img class="shot" src="/api/image/${encodeURIComponent(fid)}" alt="Trade screenshot" onerror="this.style.display='none'" />`).join("");
       document.getElementById("modalBody").innerHTML = `
         <h3>${esc(t.instrument || "Trade")} ${esc((t.direction || "").toUpperCase())} <span class="pill ${outcome}">${outcome}</span></h3>
-        <div class="meta">${t.trader ? `<span class="trader-chip">${esc(t.trader)}</span> · ` : ""}${esc(t.date || "")} · logged ${esc((t.logged_at || "").replace("T", " ").slice(0, 16))}</div>
+        <div class="meta">${t.trader ? `<span class="trader-chip">${esc(traderLabel(t.trader))}</span> · ` : ""}${esc(t.date || "")} · logged ${esc((t.logged_at || "").replace("T", " ").slice(0, 16))}</div>
         ${imgs}
         <button class="tvbtn" id="tvBtn">📈 Show live ${esc(t.instrument || "")} chart (TradingView)</button>
         <div id="tvChart"></div>
@@ -670,6 +693,7 @@
         }
         state.data = s;
         if (!state.month) { const last = s.trades.length ? s.trades[s.trades.length - 1].date : ""; const d = parseDate(last); state.month = d ? new Date(d.getFullYear(), d.getMonth(), 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1); }
+        if (!_appearanceApplied) { _appearanceApplied = true; applyAppearance(s); }
         renderControls(s);
         renderKpis(s);
         renderView(s.trades);

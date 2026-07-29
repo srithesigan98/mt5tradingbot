@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, bot, config, storage, users
+from . import auth, bot, config, settings, storage, users
 from .stats import compute, filter_by_trader, trader_names
 
 COOKIE = "tj_session"
@@ -47,6 +47,11 @@ async def lifespan(app: FastAPI):
             log.exception("Failed to set Telegram webhook")
     else:
         log.warning("PUBLIC_URL not set yet; skipping webhook registration.")
+
+    try:
+        await settings.warm()
+    except Exception:  # noqa: BLE001 — admin settings are optional; defaults still work
+        log.exception("Failed to warm settings cache")
 
     yield
 
@@ -86,6 +91,13 @@ def _require_user(request: Request) -> dict:
     return u
 
 
+def _require_admin(request: Request) -> dict:
+    u = _require_user(request)
+    if u.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="admin access required")
+    return u
+
+
 @app.get("/api/trades")
 async def api_trades(request: Request, trader: str = Query(default="")) -> JSONResponse:
     me = _require_user(request)
@@ -122,6 +134,11 @@ async def api_trades(request: Request, trader: str = Query(default="")) -> JSONR
     payload["me"] = {"username": me["username"], "role": me.get("role", "user")}
     payload["traders"] = traders
     payload["selected_trader"] = selected_trader
+    try:
+        payload["appearance"] = settings.appearance()
+    except Exception:  # noqa: BLE001 — appearance is cosmetic; never break the journal on its account
+        log.exception("Failed to load appearance settings")
+        payload["appearance"] = {}
     return JSONResponse(payload)
 
 
@@ -169,6 +186,150 @@ async def api_news_analyses() -> JSONResponse:
         log.exception("Failed to read news analyses")
         rows = []
     return JSONResponse({"analyses": rows})
+
+
+
+# --- Admin backend ---------------------------------------------------------
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request) -> JSONResponse:
+    _require_admin(request)
+    out = []
+    for u in await users.all_users():
+        out.append({
+            "username": u["username"], "telegram": u.get("telegram", ""),
+            "sheet_id": u.get("sheet_id", ""), "role": u.get("role", "user"),
+            "is_owner": bool(config.OWNER_USERNAME) and u["username"].lower() == config.OWNER_USERNAME.lower(),
+        })
+    return JSONResponse({"users": out})
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(request: Request) -> JSONResponse:
+    _require_admin(request)
+    body = await request.json()
+    try:
+        created = await users.create_user(
+            username=str(body.get("username", "")),
+            password=str(body.get("password", "")),
+            telegram=str(body.get("telegram", "")),
+            sheet_id=str(body.get("sheet_id", "")),
+            role=str(body.get("role", "user")),
+        )
+    except users.UserError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"ok": True, "user": created})
+
+
+@app.put("/api/admin/users/{username}")
+async def admin_update_user(request: Request, username: str) -> JSONResponse:
+    _require_admin(request)
+    body = await request.json()
+    try:
+        await users.update_user(
+            username,
+            password=str(body.get("password", "") or ""),
+            telegram=body.get("telegram"),
+            sheet_id=body.get("sheet_id"),
+            role=body.get("role"),
+        )
+    except users.UserError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/admin/users/{username}")
+async def admin_delete_user(request: Request, username: str) -> JSONResponse:
+    _require_admin(request)
+    try:
+        await users.delete_user(username)
+    except users.UserError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/admin/traders")
+async def admin_list_traders(request: Request) -> JSONResponse:
+    """Distinct trader names across every account's sheet, for the display-name editor."""
+    _require_admin(request)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for u in await users.all_users():
+        sid = u.get("sheet_id") or ""
+        if sid in seen:
+            continue
+        seen.add(sid)
+        try:
+            rows.extend(await storage.read_trades(sid))
+        except Exception:  # noqa: BLE001
+            log.exception("Failed to read sheet %s", sid)
+    return JSONResponse({"traders": trader_names(rows)})
+
+
+@app.get("/api/admin/settings")
+async def admin_get_settings(request: Request) -> JSONResponse:
+    _require_admin(request)
+    return JSONResponse(await settings.get_all())
+
+
+@app.post("/api/admin/settings")
+async def admin_save_settings(request: Request) -> JSONResponse:
+    _require_admin(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="expected a JSON object of settings")
+    merged = await settings.save(body)
+    return JSONResponse(merged)
+
+
+@app.get("/api/admin/diagnostics")
+async def admin_diagnostics(request: Request) -> JSONResponse:
+    _require_admin(request)
+    from . import news as news_module
+
+    sheet_checks = []
+    for u in await users.all_users():
+        sid = u.get("sheet_id") or ""
+        entry = {"username": u["username"], "sheet_id": sid}
+        try:
+            rows = await storage.read_trades(sid)
+            entry["ok"] = True
+            entry["trade_count"] = len(rows)
+        except Exception as exc:  # noqa: BLE001
+            entry["ok"] = False
+            entry["error"] = f"{type(exc).__name__}: {exc}"
+        sheet_checks.append(entry)
+
+    try:
+        subs = await asyncio.to_thread(storage.list_subscriber_ids)
+    except Exception:  # noqa: BLE001
+        subs = []
+
+    return JSONResponse({
+        "missing_config": config.missing_required(),
+        "webhook_configured": bool(config.TELEGRAM_BOT_TOKEN and config.PUBLIC_URL),
+        "public_url": config.PUBLIC_URL,
+        "subscribers": len(subs),
+        "news_cache": {
+            "source": news_module._cache.get("source", ""),
+            "fetched_at": news_module._cache.get("fetched_at", ""),
+            "events_cached": len(news_module._cache.get("events", [])),
+            "last_network_error": news_module._net.get("last_error", ""),
+        },
+        "sheets": sheet_checks,
+    })
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request) -> Response:
+    me = _current_user(request)
+    if not me:
+        return RedirectResponse("/login", status_code=303)
+    if me.get("role") != "admin":
+        return RedirectResponse("/", status_code=303)
+    resp = _TEMPLATES.TemplateResponse(request, "admin.html", {})
+    resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
 
 
 @app.api_route("/cron/news/{secret}", methods=["GET", "POST"])

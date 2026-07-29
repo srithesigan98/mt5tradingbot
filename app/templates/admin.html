@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin · Trading Journal</title>
+  <style>
+    :root {
+      --bg: #f6f4fd; --surface: #ffffff; --surface-2: #f3f0fb; --border: #e7e2f6;
+      --ink: #201c3a; --ink-2: #5b5680; --muted: #928db3;
+      --purple: #6c4cf1; --purple-dark: #2b2467; --purple-soft: #ece7fd;
+      --good: #10b981; --good-bg: #e5f7ef; --good-ink: #0a7c5c;
+      --bad: #ef4444; --bad-bg: #fdeaec; --bad-ink: #c0392b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 72px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand .logo { width: 38px; height: 38px; border-radius: 11px; background: var(--purple-dark); display: grid; place-items: center; font-size: 19px; color: #fff; }
+    .brand h1 { font-size: 19px; margin: 0; }
+    .brand .sub { color: var(--muted); font-size: 12px; }
+    a.navlink { font-size: 13px; color: var(--purple); font-weight: 600; text-decoration: none; }
+
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; overflow-x: auto; }
+    .tab { border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+      padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .tab.active { background: linear-gradient(135deg, #3a2a8f, #6c4cf1); color: #fff; border-color: transparent; }
+
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      padding: 18px; box-shadow: 0 1px 3px rgba(60, 40, 140, 0.05); margin-bottom: 16px; }
+    .card h2 { font-size: 15px; margin: 0 0 4px; }
+    .card .desc { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+
+    label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+    input[type=text], input[type=password], input[type=number], select {
+      width: 100%; border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+      border-radius: 9px; padding: 9px 11px; font-size: 13px; font-family: inherit; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
+    .checkrow { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); margin-bottom: 12px; }
+    .checkrow input { width: auto; }
+    button.btn { border: none; background: var(--purple); color: #fff; font-weight: 700; font-size: 13px;
+      border-radius: 10px; padding: 10px 18px; cursor: pointer; }
+    button.btn.secondary { background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--border); }
+    button.btn.danger { background: var(--bad-bg); color: var(--bad-ink); }
+    button.btn:disabled { opacity: .5; cursor: not-allowed; }
+    button.btn.small { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+
+    table.admin { width: 100%; border-collapse: collapse; font-size: 13px; }
+    table.admin th, table.admin td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); }
+    table.admin th { color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; }
+    .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .pill.admin { background: var(--purple-soft); color: var(--purple); }
+    .pill.user { background: var(--surface-2); color: var(--ink-2); }
+    .pill.ok { background: var(--good-bg); color: var(--good-ink); }
+    .pill.err { background: var(--bad-bg); color: var(--bad-ink); }
+    .msg { font-size: 13px; padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; }
+    .msg.ok { background: var(--good-bg); color: var(--good-ink); }
+    .msg.err { background: var(--bad-bg); color: var(--bad-ink); }
+    .actions { display: flex; gap: 6px; }
+    .trader-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .trader-row .raw { min-width: 140px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+
+    .overlay { position: fixed; inset: 0; background: rgba(24,18,60,.55); display: none; align-items: flex-start; justify-content: center; padding: 6vh 16px; z-index: 50; overflow-y: auto; }
+    .overlay.open { display: flex; }
+    .modal { background: var(--surface); border-radius: 16px; max-width: 480px; width: 100%; padding: 20px; }
+    .modal h3 { margin: 0 0 14px; font-size: 16px; }
+    .modal .actions { justify-content: flex-end; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo">⚙️</div>
+        <div><h1>Admin</h1><div class="sub">Backend settings for the trading journal</div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <a class="navlink" href="/">← Dashboard</a>
+        <a class="navlink" href="/logout">Log out</a>
+      </div>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="users">Users</button>
+      <button class="tab" data-tab="news">News &amp; Alerts</button>
+      <button class="tab" data-tab="appearance">Appearance</button>
+      <button class="tab" data-tab="diagnostics">Diagnostics</button>
+    </div>
+
+    <div id="msg"></div>
+
+    <!-- Users -->
+    <div id="panel-users">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <h2 style="margin:0">Traders &amp; accounts</h2>
+          <button class="btn small" id="addUserBtn">+ Add user</button>
+        </div>
+        <div class="desc">Each account's trades are stored in its own Google Sheet ("database"). Assign or change that Sheet ID here.</div>
+        <table class="admin" id="usersTable"><thead><tr>
+          <th>Username</th><th>Telegram</th><th>Sheet ID (database)</th><th>Role</th><th></th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <!-- News & Alerts -->
+    <div id="panel-news" style="display:none">
+      <div class="card">
+        <h2>Economic news alerts</h2>
+        <div class="desc">Controls which US economic events trigger Telegram alerts and the daily gold outlook — no redeploy needed.</div>
+        <div class="row">
+          <div><label>Countries (currency codes, comma-separated)</label><input type="text" id="s_countries" placeholder="USD" /></div>
+          <div><label>Impact levels (comma-separated)</label><input type="text" id="s_impact" placeholder="high,medium" /></div>
+          <div><label>Alert lead time (minutes before release)</label><input type="number" id="s_lookahead" min="1" max="120" /></div>
+        </div>
+        <div class="checkrow"><input type="checkbox" id="s_gold_enabled" /><label style="margin:0">Send a daily gold pre-market outlook</label></div>
+        <div class="row">
+          <div><label>Gold outlook hour (local time, 0-23)</label><input type="number" id="s_gold_hour" min="0" max="23" /></div>
+        </div>
+        <button class="btn" id="saveNewsBtn">Save news settings</button>
+      </div>
+    </div>
+
+    <!-- Appearance -->
+    <div id="panel-appearance" style="display:none">
+      <div class="card">
+        <h2>Dashboard branding</h2>
+        <div class="desc">Applies to every logged-in user's dashboard.</div>
+        <div class="row">
+          <div><label>Site title</label><input type="text" id="a_title" /></div>
+          <div><label>Subtitle</label><input type="text" id="a_subtitle" /></div>
+          <div><label>Default view on load</label>
+            <select id="a_default_view">
+              <option value="summary">Performance Summary</option>
+              <option value="charts">Customizable Charts</option>
+              <option value="cross">Cross Analysis</option>
+              <option value="calendar">Economic Calendar</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>KPI cards shown</h2>
+        <div class="desc">Uncheck any you don't want cluttering the summary view.</div>
+        <div id="kpiChecks"></div>
+      </div>
+      <div class="card">
+        <h2>Trader display names</h2>
+        <div class="desc">Traders are identified by whatever name appears in the message text. Give them a friendlier label here if you like — the raw name still drives filtering.</div>
+        <div id="traderNames"><div style="color:var(--muted);font-size:13px">Loading traders…</div></div>
+      </div>
+      <button class="btn" id="saveAppearanceBtn">Save appearance</button>
+    </div>
+
+    <!-- Diagnostics -->
+    <div id="panel-diagnostics" style="display:none">
+      <div class="card">
+        <h2>System status</h2>
+        <div id="diagBasic" style="font-size:13px;color:var(--ink-2)">Loading…</div>
+      </div>
+      <div class="card">
+        <h2>Per-account sheet connectivity</h2>
+        <table class="admin" id="diagSheets"><thead><tr><th>Username</th><th>Sheet ID</th><th>Status</th><th>Trades</th></tr></thead><tbody></tbody></table>
+      </div>
+      <button class="btn secondary" id="refreshDiagBtn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay"><div class="modal"><div id="modalBody"></div></div></div>
+
+  <script>
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+    function showMsg(text, ok) {
+      const el = document.getElementById("msg");
+      el.innerHTML = `<div class="msg ${ok ? "ok" : "err"}">${esc(text)}</div>`;
+      setTimeout(() => { el.innerHTML = ""; }, 5000);
+    }
+    async function api(url, opts) {
+      const res = await fetch(url, opts);
+      if (res.status === 401) { window.location.href = "/login"; throw new Error("login required"); }
+      if (res.status === 403) { window.location.href = "/"; throw new Error("admin only"); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "Request failed");
+      return data;
+    }
+
+    /* ---------- Tabs ---------- */
+    document.querySelectorAll("#tabs .tab").forEach(b => b.onclick = () => {
+      document.querySelectorAll("#tabs .tab").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      ["users", "news", "appearance", "diagnostics"].forEach(t =>
+        document.getElementById("panel-" + t).style.display = t === b.dataset.tab ? "" : "none");
+      if (b.dataset.tab === "diagnostics") loadDiagnostics();
+    });
+
+    /* ---------- Users ---------- */
+    function closeModal() { document.getElementById("overlay").classList.remove("open"); }
+    document.getElementById("overlay").onclick = (e) => { if (e.target.id === "overlay") closeModal(); };
+
+    function userForm(existing) {
+      const u = existing || {};
+      return `
+        <h3>${existing ? "Edit " + esc(u.username) : "Add user"}</h3>
+        <div class="row">
+          <div><label>Username</label><input type="text" id="f_username" value="${esc(u.username || "")}" ${existing ? "disabled" : ""} /></div>
+          <div><label>Password ${existing ? "(leave blank to keep)" : ""}</label><input type="password" id="f_password" /></div>
+        </div>
+        <div class="row">
+          <div><label>Telegram username (no @)</label><input type="text" id="f_telegram" value="${esc(u.telegram || "")}" /></div>
+          <div><label>Role</label><select id="f_role"><option value="user" ${u.role !== "admin" ? "selected" : ""}>user</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>admin</option></select></div>
+        </div>
+        <div><label>Sheet ID (database) — create a Google Sheet, share it with the service account, paste its ID</label><input type="text" id="f_sheet" value="${esc(u.sheet_id || "")}" /></div>
+        <div class="actions">
+          <button class="btn secondary" id="f_cancel">Cancel</button>
+          <button class="btn" id="f_save">${existing ? "Save" : "Add"}</button>
+        </div>`;
+    }
+
+    function openUserModal(existing) {
+      document.getElementById("modalBody").innerHTML = userForm(existing);
+      document.getElementById("overlay").classList.add("open");
+      document.getElementById("f_cancel").onclick = closeModal;
+      document.getElementById("f_save").onclick = async () => {
+        const body = {
+          username: document.getElementById("f_username").value.trim(),
+          password: document.getElementById("f_password").value,
+          telegram: document.getElementById("f_telegram").value.trim(),
+          sheet_id: document.getElementById("f_sheet").value.trim(),
+          role: document.getElementById("f_role").value,
+        };
+        try {
+          if (existing) await api("/api/admin/users/" + encodeURIComponent(existing.username), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          else await api("/api/admin/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          closeModal();
+          showMsg(existing ? "User updated." : "User added.", true);
+          loadUsers();
+        } catch (e) { showMsg(e.message, false); }
+      };
+    }
+    document.getElementById("addUserBtn").onclick = () => openUserModal(null);
+
+    async function loadUsers() {
+      const d = await api("/api/admin/users");
+      const tbody = document.querySelector("#usersTable tbody");
+      tbody.innerHTML = d.users.map(u => `
+        <tr>
+          <td><b>${esc(u.username)}</b>${u.is_owner ? " <span style='color:var(--muted);font-size:11px'>(owner)</span>" : ""}</td>
+          <td>${u.telegram ? "@" + esc(u.telegram) : "—"}</td>
+          <td style="font-family:monospace;font-size:11px">${esc(u.sheet_id) || "—"}</td>
+          <td><span class="pill ${u.role}">${esc(u.role)}</span></td>
+          <td class="actions">
+            ${u.is_owner ? "" : `<button class="btn small secondary" data-edit="${esc(u.username)}">Edit</button>
+            <button class="btn small danger" data-del="${esc(u.username)}">Delete</button>`}
+          </td>
+        </tr>`).join("");
+      tbody.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => openUserModal(d.users.find(u => u.username === b.dataset.edit)));
+      tbody.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+        if (!confirm(`Delete user "${b.dataset.del}"? Their login stops working (their Google Sheet is untouched).`)) return;
+        try { await api("/api/admin/users/" + encodeURIComponent(b.dataset.del), { method: "DELETE" }); showMsg("User deleted.", true); loadUsers(); }
+        catch (e) { showMsg(e.message, false); }
+      });
+    }
+
+    /* ---------- News & Alerts ---------- */
+    async function loadNewsSettings() {
+      const s = await api("/api/admin/settings");
+      document.getElementById("s_countries").value = s.news_countries || "";
+      document.getElementById("s_impact").value = s.news_impact || "";
+      document.getElementById("s_lookahead").value = s.news_lookahead_min || 15;
+      document.getElementById("s_gold_enabled").checked = String(s.gold_summary_enabled).toLowerCase() !== "false";
+      document.getElementById("s_gold_hour").value = s.gold_summary_hour || 8;
+      return s;
+    }
+    document.getElementById("saveNewsBtn").onclick = async () => {
+      try {
+        await api("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          news_countries: document.getElementById("s_countries").value.trim().toUpperCase(),
+          news_impact: document.getElementById("s_impact").value.trim().toLowerCase(),
+          news_lookahead_min: document.getElementById("s_lookahead").value,
+          gold_summary_enabled: document.getElementById("s_gold_enabled").checked ? "true" : "false",
+          gold_summary_hour: document.getElementById("s_gold_hour").value,
+        }) });
+        showMsg("News settings saved.", true);
+      } catch (e) { showMsg(e.message, false); }
+    };
+
+    /* ---------- Appearance ---------- */
+    const KPI_CARDS = [["net_pnl", "Net P&L"], ["win_rate", "Trade win %"], ["profit_factor", "Profit factor"], ["expectancy", "Trade expectancy"], ["avg_win_loss", "Avg win / loss"]];
+    let _traderMap = {};
+    async function loadAppearance(settingsData) {
+      const s = settingsData || await api("/api/admin/settings");
+      document.getElementById("a_title").value = s.site_title || "Trading Journal";
+      document.getElementById("a_subtitle").value = s.site_subtitle || "";
+      document.getElementById("a_default_view").value = s.default_view || "summary";
+      const enabled = new Set((s.kpi_cards || "net_pnl,win_rate,profit_factor,expectancy,avg_win_loss").split(","));
+      document.getElementById("kpiChecks").innerHTML = KPI_CARDS.map(([k, label]) =>
+        `<div class="checkrow"><input type="checkbox" data-kpi="${k}" ${enabled.has(k) ? "checked" : ""} /><label style="margin:0">${label}</label></div>`).join("");
+      try { _traderMap = JSON.parse(s.trader_display_names || "{}"); } catch (e) { _traderMap = {}; }
+
+      const { traders } = await api("/api/admin/traders");
+      const box = document.getElementById("traderNames");
+      if (!traders.length) { box.innerHTML = `<div style="color:var(--muted);font-size:13px">No traders logged yet.</div>`; return; }
+      box.innerHTML = traders.map(t => `
+        <div class="trader-row"><span class="raw">${esc(t)}</span>
+          <input type="text" data-raw="${esc(t)}" placeholder="Display name (optional)" value="${esc(_traderMap[t] || "")}" style="max-width:260px" /></div>`).join("");
+    }
+    document.getElementById("saveAppearanceBtn").onclick = async () => {
+      const cards = [...document.querySelectorAll("#kpiChecks [data-kpi]")].filter(c => c.checked).map(c => c.dataset.kpi);
+      const map = {};
+      document.querySelectorAll("#traderNames [data-raw]").forEach(inp => { if (inp.value.trim()) map[inp.dataset.raw] = inp.value.trim(); });
+      try {
+        await api("/api/admin/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          site_title: document.getElementById("a_title").value.trim(),
+          site_subtitle: document.getElementById("a_subtitle").value.trim(),
+          default_view: document.getElementById("a_default_view").value,
+          kpi_cards: cards.join(","),
+          trader_display_names: JSON.stringify(map),
+        }) });
+        showMsg("Appearance saved.", true);
+      } catch (e) { showMsg(e.message, false); }
+    };
+
+    /* ---------- Diagnostics ---------- */
+    async function loadDiagnostics() {
+      document.getElementById("diagBasic").textContent = "Loading…";
+      try {
+        const d = await api("/api/admin/diagnostics");
+        document.getElementById("diagBasic").innerHTML = `
+          Missing config: ${d.missing_config.length ? esc(d.missing_config.join(", ")) : "none"}<br>
+          Telegram webhook configured: ${d.webhook_configured ? "yes" : "no"}${d.public_url ? " (" + esc(d.public_url) + ")" : ""}<br>
+          News subscribers: ${d.subscribers}<br>
+          News feed cache: ${d.news_cache.events_cached} events, source "${esc(d.news_cache.source || "none")}", fetched ${esc(d.news_cache.fetched_at || "never")}${d.news_cache.last_network_error ? "<br>Last feed error: " + esc(d.news_cache.last_network_error) : ""}`;
+        document.querySelector("#diagSheets tbody").innerHTML = d.sheets.map(s => `
+          <tr><td>${esc(s.username)}</td><td style="font-family:monospace;font-size:11px">${esc(s.sheet_id)}</td>
+          <td><span class="pill ${s.ok ? "ok" : "err"}">${s.ok ? "OK" : "ERROR"}</span></td>
+          <td>${s.ok ? s.trade_count : esc(s.error || "")}</td></tr>`).join("");
+      } catch (e) { document.getElementById("diagBasic").textContent = "Could not load diagnostics: " + e.message; }
+    }
+    document.getElementById("refreshDiagBtn").onclick = loadDiagnostics;
+
+    /* ---------- Init ---------- */
+    (async () => {
+      try {
+        loadUsers();
+        const s = await loadNewsSettings();
+        await loadAppearance(s);
+      } catch (e) { showMsg(e.message, false); }
+    })();
+  </script>
+</body>
+</html>

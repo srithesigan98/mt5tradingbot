@@ -76,3 +76,58 @@ async def all_users() -> list[dict[str, Any]]:
             continue
         out.append(_public(row))
     return out
+
+
+class UserError(ValueError):
+    """A user-facing validation error for the admin API to surface."""
+
+
+def _is_owner_username(username: str) -> bool:
+    return bool(config.OWNER_USERNAME) and username.strip().lower() == config.OWNER_USERNAME.lower()
+
+
+async def create_user(
+    username: str, password: str, telegram: str, sheet_id: str, role: str = "user",
+) -> dict[str, Any]:
+    username = (username or "").strip()
+    if not username or not password:
+        raise UserError("Username and password are required.")
+    if _is_owner_username(username):
+        raise UserError("That username is reserved for the owner account.")
+    if await storage.get_user_by_login(username):
+        raise UserError(f"'{username}' already exists.")
+    if role not in ("user", "admin"):
+        role = "user"
+    await storage.add_user(username, auth.hash_password(password), telegram or "", sheet_id or "", role)
+    return _public({
+        "username": username, "telegram": telegram, "sheet_id": sheet_id, "role": role,
+    })
+
+
+async def update_user(
+    username: str, password: str = "", telegram: str | None = None,
+    sheet_id: str | None = None, role: str | None = None,
+) -> None:
+    if _is_owner_username(username):
+        raise UserError("The owner account is configured via environment variables, not here.")
+    existing = await storage.get_user_by_login(username)
+    if not existing:
+        raise UserError(f"'{username}' was not found.")
+    fields: dict[str, Any] = {}
+    if password:
+        fields["password_hash"] = auth.hash_password(password)
+    if telegram is not None:
+        fields["telegram"] = telegram.lstrip("@")
+    if sheet_id is not None:
+        fields["sheet_id"] = sheet_id
+    if role is not None and role in ("user", "admin"):
+        fields["role"] = role
+    if fields and not await storage.update_user(username, fields):
+        raise UserError(f"'{username}' was not found.")
+
+
+async def delete_user(username: str) -> None:
+    if _is_owner_username(username):
+        raise UserError("The owner account cannot be deleted.")
+    if not await storage.delete_user(username):
+        raise UserError(f"'{username}' was not found.")

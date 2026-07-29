@@ -52,6 +52,8 @@ NEWSANALYSIS_HEADERS = [
 ]
 # Users registry (CONTROL sheet). password_hash is a PBKDF2 hash from auth.py.
 USERS_HEADERS = ["username", "password_hash", "telegram", "sheet_id", "role", "created_at"]
+# Admin-editable runtime settings (CONTROL sheet "Settings" tab): simple key/value.
+SETTINGS_HEADERS = ["key", "value"]
 
 # The control sheet holds the Users registry + shared news tabs; each user's
 # trades live in their own sheet (or the control sheet for the owner).
@@ -334,3 +336,69 @@ async def get_user_by_telegram(telegram: str) -> dict[str, Any] | None:
 
 async def add_user(username: str, password_hash: str, telegram: str, sheet_id: str, role: str = "user") -> None:
     await asyncio.to_thread(_add_user_sync, username, password_hash, telegram, sheet_id, role)
+
+
+def _find_user_row_sync(username: str) -> tuple[int, dict[str, Any]] | None:
+    """Return (1-based sheet row, record) for a Users-tab row, or None."""
+    uname = (username or "").strip().lower()
+    if not uname:
+        return None
+    ws = _get_ws("Users", USERS_HEADERS)
+    for i, r in enumerate(ws.get_all_records(), start=2):  # row 1 is the header
+        if str(r.get("username", "")).strip().lower() == uname:
+            return i, r
+    return None
+
+
+def _update_user_sync(username: str, fields: dict[str, Any]) -> bool:
+    found = _find_user_row_sync(username)
+    if not found:
+        return False
+    idx, record = found
+    merged = {**record, **fields}
+    ws = _get_ws("Users", USERS_HEADERS)
+    ws.update([[merged.get(h, "") for h in USERS_HEADERS]], f"A{idx}")
+    return True
+
+
+def _delete_user_sync(username: str) -> bool:
+    found = _find_user_row_sync(username)
+    if not found:
+        return False
+    idx, _record = found
+    ws = _get_ws("Users", USERS_HEADERS)
+    ws.delete_rows(idx)
+    return True
+
+
+async def update_user(username: str, fields: dict[str, Any]) -> bool:
+    return await asyncio.to_thread(_update_user_sync, username, fields)
+
+
+async def delete_user(username: str) -> bool:
+    return await asyncio.to_thread(_delete_user_sync, username)
+
+
+# --- Admin-editable runtime settings (CONTROL sheet "Settings" tab) -------
+
+def read_settings_sync() -> dict[str, str]:
+    ws = _get_ws("Settings", SETTINGS_HEADERS)
+    out: dict[str, str] = {}
+    for r in ws.get_all_records():
+        key = str(r.get("key", "")).strip()
+        if key:
+            out[key] = str(r.get("value", ""))
+    return out
+
+
+def _save_settings_sync(values: dict[str, str]) -> None:
+    ws = _get_ws("Settings", SETTINGS_HEADERS)
+    existing = read_settings_sync()
+    merged = {**existing, **values}
+    rows = [[k, v] for k, v in merged.items()]
+    ws.clear()
+    ws.update([SETTINGS_HEADERS] + rows, "A1")
+
+
+async def save_settings(values: dict[str, str]) -> None:
+    await asyncio.to_thread(_save_settings_sync, values)

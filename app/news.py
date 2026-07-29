@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 from anthropic import AsyncAnthropic
 
-from . import config, storage, telegram
+from . import config, settings, storage, telegram
 
 log = logging.getLogger("news")
 
@@ -152,7 +152,7 @@ def _country(ev: dict[str, Any]) -> str:
 
 
 def is_target(ev: dict[str, Any]) -> bool:
-    return _country(ev) in config.NEWS_COUNTRIES and _impact(ev) in config.NEWS_IMPACT
+    return _country(ev) in settings.news_countries() and _impact(ev) in settings.news_impact()
 
 
 def _local_str(dt: datetime | None) -> str:
@@ -175,15 +175,16 @@ async def analyze(ev: dict[str, Any], phase: str) -> dict[str, Any]:
     dt = _parse_time(ev)
     impact = (_impact(ev) or "high").capitalize()
     if phase == "pre":
+        lookahead = settings.news_lookahead_min()
         user = (
-            f"Upcoming {impact}-impact US event in ~{config.NEWS_LOOKAHEAD_MIN} minutes.\n"
+            f"Upcoming {impact}-impact US event in ~{lookahead} minutes.\n"
             f"Event: {title}\nForecast: {forecast}\nPrevious: {previous}\n"
             f"Time (local): {_local_str(dt)}\n\n"
             "Give the pre-release read: what to expect, and the likely USD and Gold "
             "reaction if it beats vs misses."
         )
         emoji = "🔔"
-        tag = f"{impact}-impact US news in ~{config.NEWS_LOOKAHEAD_MIN} min"
+        tag = f"{impact}-impact US news in ~{lookahead} min"
     else:
         user = (
             f"{impact}-impact US event just released.\n"
@@ -303,7 +304,7 @@ async def run_check() -> dict[str, Any]:
 
         # Heads-up shortly before the release.
         pre_key = f"{title}|{stamp}|pre"
-        if 0 < mins <= config.NEWS_LOOKAHEAD_MIN and pre_key not in notified:
+        if 0 < mins <= settings.news_lookahead_min() and pre_key not in notified:
             result = await analyze(ev, "pre")
             sent += await _broadcast(subs, result["html"])
             await storage.log_analysis({**result, "analysis": result["body"]})
@@ -322,10 +323,10 @@ async def run_check() -> dict[str, Any]:
 
     # Daily gold pre-market outlook, once per local day after the configured hour.
     gold_note = ""
-    if config.GOLD_SUMMARY_ENABLED:
+    if settings.gold_summary_enabled():
         local_now = config.now_local()
         gold_key = f"gold|{local_now.date().isoformat()}"
-        if local_now.hour >= config.GOLD_SUMMARY_HOUR and gold_key not in notified:
+        if local_now.hour >= settings.gold_summary_hour() and gold_key not in notified:
             try:
                 await daily_gold_summary(subs, events)
                 await asyncio.to_thread(storage.mark_notified, gold_key, "Daily gold outlook")
