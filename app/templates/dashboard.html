@@ -221,6 +221,13 @@
     <!-- Performance Summary -->
     <div id="view-summary">
       <div class="day-tiles" id="dayTiles"></div>
+      <div class="card" id="insightsCard" style="display:none">
+        <div class="card-head">
+          <h2 id="insightsTitle">🧠 Trading personality &amp; coaching</h2>
+          <div id="insightsActions"></div>
+        </div>
+        <div id="insightsBody" style="color:var(--ink-2);font-size:13px"></div>
+      </div>
       <div class="grid-2">
         <div class="card">
           <div class="cal-head">
@@ -230,7 +237,7 @@
           <div class="cal-scroll"><div class="calendar" id="calendar"></div></div>
         </div>
         <div class="card">
-          <h2>Performance radar</h2>
+          <h2 id="radarTitle">Performance radar</h2>
           <div class="chart-box"><canvas id="radar"></canvas></div>
         </div>
       </div>
@@ -322,7 +329,8 @@
 
     // mode: "single" = one trader at a time (default), "combined" = all traders merged.
     let state = { mode: "single", trader: "", view: "summary", month: null, data: null,
-                  charts: {}, groupBy: "instrument", metric: "pnl", equityRange: "all" };
+                  charts: {}, groupBy: "instrument", metric: "pnl", equityRange: "all", insightsFor: undefined };
+    const mdLite = (text) => esc(text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
     let _appearanceApplied = false;
 
     /* ---------- Appearance (admin-configurable branding + defaults) ---------- */
@@ -339,6 +347,59 @@
         document.querySelectorAll("#viewtabs .viewtab").forEach(b => b.classList.toggle("active", b.dataset.view === a.default_view));
         ["summary", "charts", "cross", "calendar"].forEach(k =>
           document.getElementById("view-" + k).style.display = k === a.default_view ? "" : "none");
+      }
+    }
+
+    /* ---------- Trading personality & coaching (Claude, on demand) ---------- */
+    function insightsKey(s) {
+      const traders = s.traders || [];
+      if (traders.length <= 1) return "";                      // single account, no trader tagging needed
+      return state.mode === "single" ? (state.trader || traders[0]) : null;   // null = combined view, not applicable
+    }
+    function renderInsights(key, d) {
+      const body = document.getElementById("insightsBody");
+      const actions = document.getElementById("insightsActions");
+      if (d.available) {
+        body.innerHTML = `<div style="line-height:1.65">${mdLite(d.summary)}</div>
+          <div style="color:var(--muted);font-size:11px;margin-top:10px">Generated ${esc((d.generated_at || "").replace("T", " ").slice(0, 16))} from ${d.trade_count} trades.</div>`;
+        actions.innerHTML = `<button class="tvbtn" id="insightsBtn" style="margin:0">Regenerate</button>`;
+      } else {
+        body.innerHTML = `<div>No analysis yet${d.trade_count ? ` (${d.trade_count} trades so far)` : ""}. Generate a personality &amp; coaching read from this trader's session, direction, TP/SL/BE mix, and notes.</div>`;
+        actions.innerHTML = `<button class="tvbtn" id="insightsBtn" style="margin:0">Generate insights</button>`;
+      }
+      document.getElementById("insightsBtn").onclick = () => generateInsights(key);
+    }
+    async function generateInsights(key) {
+      document.getElementById("insightsBody").innerHTML = `<div style="color:var(--muted)">Analyzing trading style… this can take a few seconds.</div>`;
+      document.getElementById("insightsActions").innerHTML = "";
+      try {
+        const url = "/api/trader-insights?generate=true" + (key ? "&trader=" + encodeURIComponent(key) : "");
+        const d = await (await fetch(url)).json();
+        if (!d.available) { document.getElementById("insightsBody").innerHTML = `<div>${esc(d.reason || "Not enough data yet.")}</div>`; return; }
+        renderInsights(key, d);
+      } catch (e) {
+        document.getElementById("insightsBody").innerHTML = `<div style="color:var(--bad-ink)">Couldn't generate insights right now — try again shortly.</div>`;
+        document.getElementById("insightsActions").innerHTML = `<button class="tvbtn" id="insightsBtn" style="margin:0">Try again</button>`;
+        document.getElementById("insightsBtn").onclick = () => generateInsights(key);
+      }
+    }
+    async function refreshInsights(s) {
+      const card = document.getElementById("insightsCard");
+      const key = insightsKey(s);
+      if (key === null) { card.style.display = "none"; return; }
+      card.style.display = "";
+      if (state.insightsFor === key) return;   // already showing/loading this trader — don't re-peek every poll
+      state.insightsFor = key;
+      document.getElementById("insightsTitle").textContent = key
+        ? `🧠 ${traderLabel(key)}'s trading personality & coaching` : "🧠 Trading personality & coaching";
+      document.getElementById("insightsBody").innerHTML = `<div style="color:var(--muted)">Checking for existing analysis…</div>`;
+      document.getElementById("insightsActions").innerHTML = "";
+      try {
+        const url = "/api/trader-insights" + (key ? "?trader=" + encodeURIComponent(key) : "");
+        const d = await (await fetch(url)).json();
+        renderInsights(key, d);
+      } catch (e) {
+        document.getElementById("insightsBody").innerHTML = `<div style="color:var(--muted)">Couldn't check for existing analysis.</div>`;
       }
     }
 
@@ -450,7 +511,7 @@
         clamp(s.net_pnl > 0 ? (1 - dd / (dd + s.net_pnl)) * 100 : (dd === 0 ? 50 : 20)),
       ];
       const score = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
-      document.querySelector("#view-summary .card h2").textContent = `Performance radar · score ${score}/100`;
+      document.getElementById("radarTitle").textContent = `Performance radar · score ${score}/100`;
       const el = document.getElementById("radar");
       if (state.charts.radar) state.charts.radar.destroy();
       state.charts.radar = new Chart(el, { type: "radar",
@@ -745,6 +806,7 @@
         if (!state.month) { const last = s.trades.length ? s.trades[s.trades.length - 1].date : ""; const d = parseDate(last); state.month = d ? new Date(d.getFullYear(), d.getMonth(), 1) : new Date(new Date().getFullYear(), new Date().getMonth(), 1); }
         if (!_appearanceApplied) { _appearanceApplied = true; applyAppearance(s); }
         renderControls(s);
+        refreshInsights(s);
         renderKpis(s);
         renderView(s.trades);
         renderTable(s.trades);

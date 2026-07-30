@@ -54,6 +54,8 @@ NEWSANALYSIS_HEADERS = [
 USERS_HEADERS = ["username", "password_hash", "telegram", "sheet_id", "role", "created_at"]
 # Admin-editable runtime settings (CONTROL sheet "Settings" tab): simple key/value.
 SETTINGS_HEADERS = ["key", "value"]
+# Cached per-trader "personality" analysis (CONTROL sheet "TraderInsights" tab).
+TRADERINSIGHTS_HEADERS = ["key", "generated_at", "trade_count", "summary"]
 
 # The control sheet holds the Users registry + shared news tabs; each user's
 # trades live in their own sheet (or the control sheet for the owner).
@@ -402,3 +404,45 @@ def _save_settings_sync(values: dict[str, str]) -> None:
 
 async def save_settings(values: dict[str, str]) -> None:
     await asyncio.to_thread(_save_settings_sync, values)
+
+
+# --- Cached per-trader "personality" insights (CONTROL sheet) -------------
+
+def _find_insight_row_sync(key: str) -> tuple[int, dict[str, Any]] | None:
+    ws = _get_ws("TraderInsights", TRADERINSIGHTS_HEADERS)
+    key_l = key.strip().lower()
+    for i, r in enumerate(ws.get_all_records(), start=2):
+        if str(r.get("key", "")).strip().lower() == key_l:
+            return i, r
+    return None
+
+
+def _read_insight_sync(key: str) -> dict[str, Any] | None:
+    found = _find_insight_row_sync(key)
+    if not found:
+        return None
+    _idx, r = found
+    try:
+        trade_count = int(r.get("trade_count") or 0)
+    except (TypeError, ValueError):
+        trade_count = 0
+    return {"generated_at": r.get("generated_at", ""), "trade_count": trade_count, "summary": r.get("summary", "")}
+
+
+def _save_insight_sync(key: str, entry: dict[str, Any]) -> None:
+    ws = _get_ws("TraderInsights", TRADERINSIGHTS_HEADERS)
+    row = [key, entry.get("generated_at", ""), entry.get("trade_count", 0), entry.get("summary", "")]
+    found = _find_insight_row_sync(key)
+    if found:
+        idx, _r = found
+        ws.update([row], f"A{idx}")
+    else:
+        ws.append_row(row, value_input_option="USER_ENTERED")
+
+
+async def read_trader_insight(key: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_read_insight_sync, key)
+
+
+async def save_trader_insight(key: str, entry: dict[str, Any]) -> None:
+    await asyncio.to_thread(_save_insight_sync, key, entry)

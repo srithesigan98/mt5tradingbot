@@ -98,28 +98,30 @@ def _require_admin(request: Request) -> dict:
     return u
 
 
+async def _rows_for_user(me: dict) -> list[dict]:
+    """An admin sees every trader (all accounts combined); a normal user sees
+    only their own sheet's rows."""
+    if me.get("role") == "admin":
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for u in await users.all_users():
+            sid = u.get("sheet_id") or ""
+            if sid in seen:
+                continue
+            seen.add(sid)
+            try:
+                rows.extend(await storage.read_trades(sid))
+            except Exception:  # noqa: BLE001 — one bad sheet shouldn't break the rest
+                log.exception("Failed to read sheet %s", sid)
+        return rows
+    return await storage.read_trades(me["sheet_id"])
+
+
 @app.get("/api/trades")
 async def api_trades(request: Request, trader: str = Query(default="")) -> JSONResponse:
     me = _require_user(request)
-
-    # Build the dataset. An admin sees every trader (all accounts combined);
-    # a normal user sees only their own sheet. Either way the dashboard then
-    # filters by the `trader` column (the name in the table).
     try:
-        if me.get("role") == "admin":
-            rows = []
-            seen: set[str] = set()
-            for u in await users.all_users():
-                sid = u.get("sheet_id") or ""
-                if sid in seen:
-                    continue
-                seen.add(sid)
-                try:
-                    rows.extend(await storage.read_trades(sid))
-                except Exception:  # noqa: BLE001 — one bad sheet shouldn't break the rest
-                    log.exception("Failed to read sheet %s", sid)
-        else:
-            rows = await storage.read_trades(me["sheet_id"])
+        rows = await _rows_for_user(me)
     except Exception:  # noqa: BLE001
         log.exception("Failed to read trades")
         raise HTTPException(status_code=500, detail="could not read journal")
@@ -140,6 +142,56 @@ async def api_trades(request: Request, trader: str = Query(default="")) -> JSONR
         log.exception("Failed to load appearance settings")
         payload["appearance"] = {}
     return JSONResponse(payload)
+
+
+@app.get("/api/trader-insights")
+async def api_trader_insights(
+    request: Request, trader: str = Query(default=""), generate: bool = Query(default=False),
+) -> JSONResponse:
+    """A Claude-written 'trading personality' profile + coaching tips for one
+    trader, cached until their trade count changes. Only generated on demand
+    (generate=true) — never on the 30s auto-refresh — to avoid needless API
+    calls; a plain GET just peeks at whatever is already cached."""
+    me = _require_user(request)
+    try:
+        rows = await _rows_for_user(me)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail="could not read journal")
+
+    trader = trader.strip()
+    if trader:
+        rows = filter_by_trader(rows, trader)
+    if not rows:
+        return JSONResponse({"available": False, "reason": "no trades"})
+
+    cache_key = trader or f"__account__:{me['username']}"
+    try:
+        cached = await storage.read_trader_insight(cache_key)
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to read cached trader insight")
+        cached = None
+    fresh = bool(cached) and cached.get("trade_count") == len(rows)
+
+    if not fresh:
+        if not generate:
+            return JSONResponse({"available": False, "stale": True, "trade_count": len(rows)})
+        from . import insights
+        try:
+            summary = await insights.generate(trader or me["username"], rows)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("Trader insight generation failed")
+            raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}")
+        cached = {
+            "generated_at": config.now_local().isoformat(timespec="seconds"),
+            "trade_count": len(rows),
+            "summary": summary,
+        }
+        try:
+            await storage.save_trader_insight(cache_key, cached)
+        except Exception:  # noqa: BLE001
+            log.exception("Failed to cache trader insight")
+
+    return JSONResponse({"available": True, **cached})
 
 
 # Small in-memory cache so repeat views don't re-download from Telegram.
