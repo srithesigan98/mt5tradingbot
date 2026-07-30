@@ -18,7 +18,7 @@ def _clean(value: str | None) -> str:
 TELEGRAM_BOT_TOKEN = _clean(os.getenv("TELEGRAM_BOT_TOKEN"))
 WEBHOOK_SECRET = _clean(os.getenv("WEBHOOK_SECRET")) or "changeme"
 ANTHROPIC_API_KEY = _clean(os.getenv("ANTHROPIC_API_KEY"))
-ANTHROPIC_MODEL = _clean(os.getenv("ANTHROPIC_MODEL")) or "claude-sonnet-5"
+ANTHROPIC_MODEL = _clean(os.getenv("ANTHROPIC_MODEL")) or "claude-haiku-4-5"
 GOOGLE_SHEET_ID = _clean(os.getenv("GOOGLE_SHEET_ID"))
 GOOGLE_CREDENTIALS_JSON = _clean(os.getenv("GOOGLE_CREDENTIALS_JSON"))
 WORKSHEET_NAME = _clean(os.getenv("WORKSHEET_NAME")) or "Trades"

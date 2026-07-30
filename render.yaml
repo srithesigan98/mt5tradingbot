@@ -17,7 +17,7 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ANTHROPIC_MODEL
-        value: claude-sonnet-5
+        value: claude-haiku-4-5
       - key: UTC_OFFSET_HOURS
         value: "8"
       - key: GOOGLE_SHEET_ID
