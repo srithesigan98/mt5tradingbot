@@ -41,6 +41,12 @@
     .modebar { display: inline-flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 12px; }
     .modebtn { border: none; background: transparent; color: var(--ink-2); padding: 8px 16px; border-radius: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
     .modebtn.active { background: var(--purple); color: #fff; }
+
+    .rangebar { display: inline-flex; gap: 3px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 3px; flex: none; }
+    .rangebtn { border: none; background: transparent; color: var(--ink-2); padding: 5px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .rangebtn.active { background: var(--purple); color: #fff; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .card-head h2 { margin: 0; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
       padding: 16px 18px; box-shadow: 0 1px 3px rgba(60, 40, 140, 0.05); }
     .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--ink-2); font-weight: 600; }
@@ -88,6 +94,7 @@
 
     .chart-box { position: relative; height: 300px; }
     .chart-box.tall { height: 360px; }
+    .chart-box .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0; }
 
     /* Custom chart controls */
     .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -153,6 +160,9 @@
       .viewtab { padding: 9px 15px; font-size: 13px; }
       .modebar { display: flex; width: 100%; }
       .modebtn { flex: 1; }
+      .card-head { gap: 8px; }
+      .rangebar { overflow-x: auto; scrollbar-width: none; max-width: 100%; }
+      .rangebar::-webkit-scrollbar { display: none; }
 
       /* KPI cards: two per row, smaller numbers so long P&L never overflows */
       .kpis { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
@@ -224,7 +234,19 @@
           <div class="chart-box"><canvas id="radar"></canvas></div>
         </div>
       </div>
-      <div class="card"><h2>Equity curve (cumulative P&amp;L)</h2><div class="chart-box"><canvas id="equity"></canvas></div></div>
+      <div class="card">
+        <div class="card-head">
+          <h2>Equity curve (cumulative P&amp;L)</h2>
+          <div class="rangebar" id="equityRange">
+            <button class="rangebtn" data-range="7d">7D</button>
+            <button class="rangebtn" data-range="30d">30D</button>
+            <button class="rangebtn" data-range="90d">90D</button>
+            <button class="rangebtn" data-range="ytd">YTD</button>
+            <button class="rangebtn active" data-range="all">All</button>
+          </div>
+        </div>
+        <div class="chart-box"><canvas id="equity"></canvas><div class="empty" id="equityEmpty" style="display:none">No trades in this range.</div></div>
+      </div>
     </div>
 
     <!-- Customizable Charts -->
@@ -300,7 +322,7 @@
 
     // mode: "single" = one trader at a time (default), "combined" = all traders merged.
     let state = { mode: "single", trader: "", view: "summary", month: null, data: null,
-                  charts: {}, groupBy: "instrument", metric: "pnl" };
+                  charts: {}, groupBy: "instrument", metric: "pnl", equityRange: "all" };
     let _appearanceApplied = false;
 
     /* ---------- Appearance (admin-configurable branding + defaults) ---------- */
@@ -474,15 +496,43 @@
     }
 
     /* ---------- Equity curve ---------- */
-    function renderEquity(trades) {
-      const ctx = document.getElementById("equity"); const purple = css("--purple");
+    function equityRangeCutoff(range) {
+      if (range === "all") return null;
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      if (range === "ytd") return new Date(now.getFullYear(), 0, 1);
+      const days = { "7d": 7, "30d": 30, "90d": 90 }[range] || 0;
+      const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - days);
+      return cutoff;
+    }
+    function renderEquity(allTrades) {
+      const cutoff = equityRangeCutoff(state.equityRange);
+      const trades = cutoff
+        ? allTrades.filter(t => { const d = parseDate(t.date); return d && d >= cutoff; })
+        : allTrades;
+      const emptyEl = document.getElementById("equityEmpty");
+      const ctx = document.getElementById("equity");
+      if (!trades.length) {
+        if (state.charts.equity) { state.charts.equity.destroy(); state.charts.equity = null; }
+        ctx.style.display = "none"; emptyEl.style.display = "flex";
+        return;
+      }
+      ctx.style.display = ""; emptyEl.style.display = "none";
+      // Rebase cumulative P&L to the start of the selected window, not the all-time total.
+      let running = 0;
+      const points = trades.map(t => { running += (t.pnl_amount || 0); return { date: t.date, cum: round2(running) }; });
+      const purple = css("--purple");
       const g = ctx.getContext("2d").createLinearGradient(0, 0, 0, 300); g.addColorStop(0, purple + "3d"); g.addColorStop(1, purple + "00");
       if (state.charts.equity) state.charts.equity.destroy();
       state.charts.equity = new Chart(ctx, { type: "line",
-        data: { labels: trades.map(t => "#" + t.index), datasets: [{ data: trades.map(t => t.cumulative_pnl), borderColor: purple, backgroundColor: g, borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: trades.length > 40 ? 0 : 3, pointBackgroundColor: purple }] },
+        data: { labels: points.map(p => p.date || ""), datasets: [{ data: points.map(p => p.cum), borderColor: purple, backgroundColor: g, borderWidth: 2.5, fill: true, tension: 0.3, pointRadius: points.length > 40 ? 0 : 3, pointBackgroundColor: purple }] },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => "Cumulative: " + money(c.parsed.y) } } },
           scales: { x: { grid: { color: css("--border") }, ticks: { color: css("--muted"), maxTicksLimit: 8 } }, y: { grid: { color: css("--border") }, ticks: { color: css("--muted"), callback: v => money(v) } } } } });
     }
+    document.querySelectorAll("#equityRange .rangebtn").forEach(b => b.onclick = () => {
+      state.equityRange = b.dataset.range;
+      document.querySelectorAll("#equityRange .rangebtn").forEach(x => x.classList.toggle("active", x === b));
+      if (state.data) renderEquity(state.data.trades);
+    });
 
     /* ---------- Customizable chart ---------- */
     function renderCustom(trades) {
