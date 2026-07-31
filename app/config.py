@@ -19,6 +19,10 @@ TELEGRAM_BOT_TOKEN = _clean(os.getenv("TELEGRAM_BOT_TOKEN"))
 WEBHOOK_SECRET = _clean(os.getenv("WEBHOOK_SECRET")) or "changeme"
 ANTHROPIC_API_KEY = _clean(os.getenv("ANTHROPIC_API_KEY"))
 ANTHROPIC_MODEL = _clean(os.getenv("ANTHROPIC_MODEL")) or "claude-haiku-4-5"
+# Trade screenshot extraction needs to read and sum dense, often-overlapping
+# MT5 history rows across multiple images — kept on a stronger model than the
+# other (cheaper, simpler) Claude calls.
+ANTHROPIC_MODEL_EXTRACTION = _clean(os.getenv("ANTHROPIC_MODEL_EXTRACTION")) or "claude-sonnet-5"
 GOOGLE_SHEET_ID = _clean(os.getenv("GOOGLE_SHEET_ID"))
 GOOGLE_CREDENTIALS_JSON = _clean(os.getenv("GOOGLE_CREDENTIALS_JSON"))
 WORKSHEET_NAME = _clean(os.getenv("WORKSHEET_NAME")) or "Trades"

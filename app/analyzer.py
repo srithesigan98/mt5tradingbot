@@ -65,7 +65,10 @@ _RECORD_TRADE_TOOL: dict[str, Any] = {
                 "description": (
                     "P&L amount in account currency. The template labels this 'Profit' "
                     "even for losses — set the SIGN to match the outcome: negative for a "
-                    "loss, positive for a profit, and the stated value (or 0) for breakeven."
+                    "loss, positive for a profit, and the stated value (or 0) for breakeven. "
+                    "If the screenshot(s) show several partial-close rows for one position, "
+                    "this is the SUM of every unique row's profit — deduplicate any row that "
+                    "appears in more than one screenshot (same timestamp) before summing."
                 ),
             },
             "pnl_currency": {"type": ["string", "null"], "description": "e.g. USD."},
@@ -144,8 +147,17 @@ _SYSTEM_PROMPT = (
     "account may log trades for several traders, and each is tracked separately.\n"
     "2. You may receive MULTIPLE screenshots — they all describe the SAME single "
     "trade. Never split them into multiple trades.\n"
-    "3. If multiple entries or partial positions appear, COMPOUND them into ONE "
-    "trade (average the entry price; it is still a single trade).\n"
+    "3. A screenshot may show several rows (partial closes / scaled-out exits of "
+    "one position, e.g. an MT5 history list). ALL of those rows, across ALL "
+    "screenshots in the message, belong to this ONE trade. pnl_amount MUST be "
+    "the SUM of every row's individual profit/loss — never just one row's value, "
+    "and never an average. entry_price is the lot-size-weighted average entry "
+    "across the rows; exit_price is the last (most recent) exit.\n"
+    "3b. Screenshots of a scrolling list often overlap at the edges: the last "
+    "few rows of one screenshot can be the same rows as the first few of the "
+    "next (identical timestamp, prices, and profit). Before summing, identify "
+    "rows that appear in more than one screenshot by their timestamp and count "
+    "each one only ONCE — do not double-count an overlapping row.\n"
     "4. Outcome: 'Hit TP'/target -> profit; 'Hit SL'/stopped out -> loss; "
     "'Hit BE'/breakeven/moved to BE -> breakeven. Make pnl_amount's sign match.\n"
     "5. 'SL 50 pips' / 'TP 50 pips' are the risk setup (distances), NOT the "
@@ -194,7 +206,7 @@ async def analyze(
     content.append({"type": "text", "text": prompt})
 
     response = await _get_client().messages.create(
-        model=config.ANTHROPIC_MODEL,
+        model=config.ANTHROPIC_MODEL_EXTRACTION,
         max_tokens=1024,
         system=_SYSTEM_PROMPT,
         tools=[_RECORD_TRADE_TOOL],
